@@ -1,0 +1,179 @@
+import { ema, rsi, macd, bollinger, atr, supportResistance, percentChange } from "../src/indicators.js";
+import { OkxClient } from "../src/okx.js";
+
+const SYMBOLS = ["BTC", "ETH", "BNB", "XRP", "SOL"];
+const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
+const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
+const MODE = process.env.BACKTEST_MODE || "strong-buy";
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function actionFromCandles(symbol, candles, bitcoinScore = 50) {
+  const closes = candles.map((candle) => candle.close);
+  const volumes = candles.map((candle) => candle.volume);
+  const current = closes.at(-1);
+  const previous24h = closes.at(-7) ?? closes[0];
+  const currentAtr = atr(candles, 14) ?? current * 0.025;
+  const levels = supportResistance(candles);
+  const activeSupport = levels.support && levels.support < current ? levels.support : null;
+  const activeResistance = levels.resistance && levels.resistance > current ? levels.resistance : null;
+  const ema20 = ema(closes, 20);
+  const ema50 = ema(closes, 50);
+  const ema200 = ema(closes, 200);
+  const currentRsi = rsi(closes, 14);
+  const currentMacd = macd(closes);
+  const bands = bollinger(closes, 20);
+  const averageVolume = volumes.slice(-30, -1).reduce((sum, value) => sum + value, 0) / Math.max(volumes.slice(-30, -1).length, 1);
+  const volumeRatio = volumes.at(-1) / averageVolume;
+
+  if ([ema20, ema50, ema200, currentRsi, currentMacd, bands].some((value) => value === null || value === undefined)) {
+    return null;
+  }
+
+  const trendRaw = [
+    current > ema20 ? 0.35 : -0.2,
+    current > ema50 ? 0.35 : -0.25,
+    current > ema200 ? 0.3 : -0.35,
+    ema20 > ema50 ? 0.2 : -0.15
+  ].reduce((sum, value) => sum + value, 0);
+
+  const momentumRaw = [
+    currentRsi > 50 && currentRsi < 70 ? 0.35 : currentRsi >= 70 ? -0.1 : -0.2,
+    currentMacd?.histogram > 0 ? 0.3 : -0.2,
+    percentChange(current, previous24h) > 0 ? 0.25 : -0.15,
+    bands && current > bands.middle ? 0.15 : -0.1
+  ].reduce((sum, value) => sum + value, 0);
+
+  const volumeRaw = volumeRatio > 1.15 ? 0.8 : volumeRatio > 0.85 ? 0.35 : -0.3;
+  const marketContextRaw = 0.55;
+  const bitcoinFilterRaw = symbol === "BTC" ? 0.7 : bitcoinScore >= 65 ? 0.65 : bitcoinScore >= 50 ? 0.25 : -0.25;
+  const distanceToSupport = activeSupport ? ((current - activeSupport) / current) * 100 : (currentAtr / current) * 100;
+  const distanceToResistance = activeResistance ? ((activeResistance - current) / current) * 100 : (currentAtr * 2 / current) * 100;
+  const riskRaw = distanceToResistance > distanceToSupport * 0.8 ? 0.55 : 0.05;
+
+  const weights = {
+    trend: 24,
+    momentum: 19,
+    volume: 15,
+    marketContext: 18,
+    bitcoinFilter: 16,
+    riskControl: 8
+  };
+  const factors = {
+    trend: clamp(trendRaw, -1, 1),
+    momentum: clamp(momentumRaw, -1, 1),
+    volume: clamp(volumeRaw, -1, 1),
+    marketContext: clamp(marketContextRaw, -1, 1),
+    bitcoinFilter: clamp(bitcoinFilterRaw, -1, 1),
+    riskControl: clamp(riskRaw, -1, 1)
+  };
+  const totalWeight = Object.values(weights).reduce((sum, value) => sum + value, 0);
+  const weighted = Object.entries(factors).reduce((sum, [key, value]) => sum + ((value + 1) / 2) * weights[key], 0);
+  const confidence = clamp(Math.round((weighted / totalWeight) * 100), 0, 100);
+  const risk = confidence >= 78 ? "medium" : confidence >= 65 ? "medium" : "high";
+  const stopAtr = risk === "high" ? 2.3 : 1.8;
+  const targetAtr = risk === "high" ? 3.6 : 2.8;
+  const atrStop = current - currentAtr * stopAtr;
+  const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
+  const target1 = current + currentAtr * targetAtr;
+  let action = "انتظار";
+  if (confidence >= 82) action = "شراء صريح";
+  else if (confidence >= 78) action = "شراء مشروط";
+  else if (confidence >= 65) action = "مراقبة للشراء";
+  else if (confidence <= 42) action = "تجنب";
+  return { symbol, action, confidence, entry: current, stop, target1, timestamp: candles.at(-1).timestamp };
+}
+
+function shouldEnter(signal) {
+  if (!signal) return false;
+  if (MODE === "strong-buy") return signal.action === "شراء صريح";
+  if (MODE === "all-non-avoid") return signal.action !== "تجنب";
+  return ["شراء صريح", "شراء مشروط", "مراقبة للشراء"].includes(signal.action);
+}
+
+function settle(signal, futureCandles) {
+  for (const candle of futureCandles) {
+    const hitStop = candle.low <= signal.stop;
+    const hitTarget = candle.high >= signal.target1;
+    if (hitStop && hitTarget) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp, ambiguous: true };
+    if (hitTarget) return { status: "win", exit: signal.target1, timestamp: candle.timestamp };
+    if (hitStop) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
+  }
+  const last = futureCandles.at(-1);
+  const exit = last?.close ?? signal.entry;
+  return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
+}
+
+function profitUsdt(entry, exit) {
+  return TRADE_USDT * ((exit - entry) / entry);
+}
+
+const okx = new OkxClient();
+const limit = 300;
+const since = Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+const all = {};
+for (const symbol of SYMBOLS) {
+  all[symbol] = (await okx.getCandles(symbol, "4H", limit)).filter((candle) => candle.timestamp >= since - 220 * 4 * 60 * 60 * 1000);
+}
+
+const trades = [];
+const startIndex = 210;
+const btcCandles = all.BTC;
+for (const symbol of SYMBOLS) {
+  const candles = all[symbol];
+  for (let i = startIndex; i < candles.length - 1; i += 1) {
+    if (candles[i].timestamp < since) continue;
+    const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
+    const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
+    const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
+    if (!shouldEnter(signal)) continue;
+    const outcome = settle(signal, candles.slice(i + 1));
+    trades.push({
+      ...signal,
+      status: outcome.status,
+      exit: outcome.exit,
+      profit: profitUsdt(signal.entry, outcome.exit),
+      ambiguous: outcome.ambiguous ?? false
+    });
+  }
+}
+
+const closed = trades.filter((trade) => trade.status === "win" || trade.status === "loss");
+const wins = closed.filter((trade) => trade.status === "win");
+const losses = closed.filter((trade) => trade.status === "loss");
+const totalProfit = trades.reduce((sum, trade) => sum + trade.profit, 0);
+const bySymbol = Object.fromEntries(SYMBOLS.map((symbol) => {
+  const rows = trades.filter((trade) => trade.symbol === symbol);
+  return [symbol, {
+    trades: rows.length,
+    wins: rows.filter((trade) => trade.status === "win").length,
+    losses: rows.filter((trade) => trade.status === "loss").length,
+    profit: Number(rows.reduce((sum, trade) => sum + trade.profit, 0).toFixed(2))
+  }];
+}));
+
+console.log(JSON.stringify({
+  mode: MODE,
+  days: LOOKBACK_DAYS,
+  tradeUsdt: TRADE_USDT,
+  symbols: SYMBOLS,
+  totalTrades: trades.length,
+  closedTrades: closed.length,
+  wins: wins.length,
+  losses: losses.length,
+  open: trades.length - closed.length,
+  winRate: closed.length ? Number(((wins.length / closed.length) * 100).toFixed(2)) : 0,
+  totalProfit: Number(totalProfit.toFixed(2)),
+  bySymbol,
+  assumptions: [
+    "4H candles",
+    "entry at signal candle close",
+    "take profit at target1",
+    "stop loss at strategy stop",
+    "if TP and SL hit same candle, counted as loss",
+    "fees/slippage not included",
+    "current top 5 symbols used"
+  ]
+}, null, 2));
