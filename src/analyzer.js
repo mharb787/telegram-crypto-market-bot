@@ -23,13 +23,15 @@ async function getJson(url) {
   return response.json();
 }
 
+const EXCLUDED_FROM_RESULTS = new Set(["BTC", "ETH"]);
+
 export async function fetchTopCryptoAssets(limit = 5) {
   const url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=30&page=1&sparkline=false&price_change_percentage=24h,7d";
   const markets = await getJson(url);
   return markets
     .filter((asset) => {
       const symbol = asset.symbol.toUpperCase();
-      return !STABLE_SYMBOLS.has(symbol) && !EXCLUDED_LIKE_STABLE.has(symbol);
+      return !STABLE_SYMBOLS.has(symbol) && !EXCLUDED_LIKE_STABLE.has(symbol) && !EXCLUDED_FROM_RESULTS.has(symbol);
     })
     .slice(0, limit)
     .map((asset) => ({
@@ -178,11 +180,10 @@ function getBitcoinStateFromAnalysis(analysis) {
 export async function analyzeMarket() {
   const strategy = await loadStrategy();
   const assets = await fetchTopCryptoAssets(5);
-  const btcAsset = assets.find((asset) => asset.symbol === "BTC") ?? { symbol: "BTC", name: "Bitcoin" };
-  const btcAnalysis = await buildAssetAnalysis(btcAsset, strategy, { score: 50 });
+  const btcAnalysis = await buildAssetAnalysis({ symbol: "BTC", name: "Bitcoin" }, strategy, { score: 50 });
   const bitcoinState = getBitcoinStateFromAnalysis(btcAnalysis);
-  const results = [btcAnalysis];
-  for (const asset of assets.filter((item) => item.symbol !== "BTC")) {
+  const results = [];
+  for (const asset of assets) {
     try {
       results.push(await buildAssetAnalysis(asset, strategy, bitcoinState));
     } catch (error) {

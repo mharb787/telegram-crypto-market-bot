@@ -1,6 +1,7 @@
 import { ema, rsi, macd, bollinger, atr, supportResistance, percentChange } from "../src/indicators.js";
 
-const SYMBOLS = ["BTC", "ETH", "BNB", "XRP", "SOL"];
+const SYMBOLS = ["BNB", "XRP", "SOL", "DOGE", "ADA"];
+const BTC_SYMBOL = "BTC";
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
@@ -135,13 +136,14 @@ async function getBinanceCandles(symbol, startTime, endTime) {
   }));
 }
 
+all[BTC_SYMBOL] = await getBinanceCandles(BTC_SYMBOL, warmupSince, until);
 for (const symbol of SYMBOLS) {
   all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
 }
 
 const trades = [];
 const startIndex = 210;
-const btcCandles = all.BTC;
+const btcCandles = all[BTC_SYMBOL];
 for (const symbol of SYMBOLS) {
   const candles = all[symbol];
   for (let i = startIndex; i < candles.length - 1; i += 1) {
