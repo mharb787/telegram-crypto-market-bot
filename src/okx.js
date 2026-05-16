@@ -72,6 +72,21 @@ export class OkxClient {
     };
   }
 
+  async getCandles(symbol, bar = "4H", limit = 120) {
+    const instId = `${symbol.toUpperCase()}-USDT`;
+    const data = await this.request("GET", `/api/v5/market/candles?instId=${instId}&bar=${bar}&limit=${limit}`);
+    return data
+      .map((row) => ({
+        timestamp: Number(row[0]),
+        open: Number(row[1]),
+        high: Number(row[2]),
+        low: Number(row[3]),
+        close: Number(row[4]),
+        volume: Number(row[5])
+      }))
+      .reverse();
+  }
+
   async placeSpotMarketBuyWithTpSl({ symbol, quoteAmount, takeProfit, stopLoss }) {
     const instId = `${symbol.toUpperCase()}-USDT`;
     const clientId = `t${Date.now()}${symbol}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);

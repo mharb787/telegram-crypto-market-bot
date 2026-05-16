@@ -34,6 +34,32 @@ export class TelegramBot {
     }
   }
 
+  async sendPhoto(buffer, caption, options = {}) {
+    if (this.dryRun || !this.token || !this.chatId) {
+      console.log("\n--- TELEGRAM PHOTO ---\n");
+      console.log(caption);
+      return;
+    }
+
+    const form = new FormData();
+    form.set("chat_id", String(this.chatId));
+    form.set("photo", new Blob([buffer], { type: "image/png" }), "recommendation-chart.png");
+    form.set("caption", caption);
+    form.set("parse_mode", "HTML");
+    for (const [key, value] of Object.entries(options)) {
+      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+    }
+
+    const response = await fetch(this.apiUrl("sendPhoto"), {
+      method: "POST",
+      body: form
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram sendPhoto failed: ${response.status} ${await response.text()}`);
+    }
+  }
+
   async answerCallbackQuery(callbackQueryId, text = "") {
     if (this.dryRun || !this.token) return;
     const response = await fetch(this.apiUrl("answerCallbackQuery"), {

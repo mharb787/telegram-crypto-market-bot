@@ -12,6 +12,7 @@ import {
   setPendingTrade
 } from "./trading.js";
 import { OkxClient } from "./okx.js";
+import { createRecommendationChart } from "./chart.js";
 import fs from "node:fs";
 
 function loadDotEnv() {
@@ -98,21 +99,32 @@ function formatRecommendationMessage(recommendation) {
   ].join("\n");
 }
 
+async function sendRecommendation(recommendation, prefix = "") {
+  const caption = prefix ? `${prefix}\n\n${formatRecommendationMessage(recommendation)}` : formatRecommendationMessage(recommendation);
+  const reply_markup = {
+    inline_keyboard: [[
+      {
+        text: `ابدأ صفقة ${recommendation.symbol} حسب التوصية`,
+        callback_data: `trade:${recommendation.id}`
+      }
+    ]]
+  };
+
+  try {
+    const chart = await createRecommendationChart(recommendation);
+    await bot.sendPhoto(chart, caption, { reply_markup });
+  } catch (error) {
+    console.error(`Chart generation failed for ${recommendation.symbol}: ${error.message}`);
+    await bot.sendMessage(caption, { reply_markup });
+  }
+}
+
 async function sendRecommendationMessages(report) {
   const valid = report.results.filter((item) => !item.error);
   for (const item of valid) {
     const recommendation = toTradeRecommendation(item);
     await saveTradeRecommendation(recommendation);
-    await bot.sendMessage(formatRecommendationMessage(recommendation), {
-      reply_markup: {
-        inline_keyboard: [[
-          {
-            text: `ابدأ صفقة ${recommendation.symbol} حسب التوصية`,
-            callback_data: `trade:${recommendation.id}`
-          }
-        ]]
-      }
-    });
+    await sendRecommendation(recommendation);
   }
 }
 
@@ -129,16 +141,7 @@ async function sendStrongBuyAlerts(report) {
 
     const recommendation = toTradeRecommendation(item);
     await saveTradeRecommendation(recommendation);
-    await bot.sendMessage(`تنبيه شراء صريح\n\n${formatRecommendationMessage(recommendation)}`, {
-      reply_markup: {
-        inline_keyboard: [[
-          {
-            text: `ابدأ صفقة ${recommendation.symbol} حسب التوصية`,
-            callback_data: `trade:${recommendation.id}`
-          }
-        ]]
-      }
-    });
+    await sendRecommendation(recommendation, "تنبيه شراء صريح");
     nextCooldowns[item.symbol] = new Date(now).toISOString();
   }
 
