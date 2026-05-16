@@ -300,6 +300,17 @@ async function handleCallback(callbackQuery) {
   }
 }
 
+async function startPollingLoop() {
+  while (true) {
+    try {
+      await bot.poll({ onMessage: handleCommand, onCallback: handleCallback });
+    } catch (error) {
+      console.error(error);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+}
+
 async function main() {
   if (!config.token && !config.dryRun) {
     throw new Error("TELEGRAM_BOT_TOKEN is required unless DRY_RUN=true or --once is used.");
@@ -323,9 +334,7 @@ async function main() {
     runCycle().catch((error) => console.error(error));
   }, config.analysisIntervalMinutes * 60 * 1000);
 
-  setInterval(() => {
-    bot.poll({ onMessage: handleCommand, onCallback: handleCallback }).catch((error) => console.error(error));
-  }, 3000);
+  startPollingLoop().catch((error) => console.error(error));
 }
 
 main().catch((error) => {
