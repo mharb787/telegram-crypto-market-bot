@@ -33,6 +33,8 @@ export class OkxClient {
   async request(method, path, body = null, { auth = false } = {}) {
     const bodyText = body ? JSON.stringify(body) : "";
     const headers = { "content-type": "application/json" };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
     if (auth) {
       if (!this.hasCredentials()) {
@@ -46,16 +48,26 @@ export class OkxClient {
       if (this.simulated) headers["x-simulated-trading"] = "1";
     }
 
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: bodyText || undefined
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.code !== "0") {
-      throw new Error(`OKX ${method} ${path} failed: ${payload.msg || response.statusText}`);
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: bodyText || undefined,
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.code !== "0") {
+        throw new Error(`OKX ${method} ${path} failed: ${payload.msg || response.statusText}`);
+      }
+      return payload.data;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error(`OKX ${method} ${path} timed out`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return payload.data;
   }
 
   async getTicker(symbol) {
