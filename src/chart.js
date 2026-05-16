@@ -151,7 +151,9 @@ function labelLine(png, y, label, price, color, chart) {
 
 export async function createRecommendationChart(recommendation) {
   const okx = new OkxClient();
+  if (process.env.CHART_DEBUG === "1") console.log("chart: fetching candles");
   const candles = await okx.getCandles(recommendation.symbol, "4H", 120);
+  if (process.env.CHART_DEBUG === "1") console.log(`chart: candles ${candles.length}`);
   const width = 1100;
   const height = 700;
   const png = new PNG({ width, height });
@@ -213,5 +215,8 @@ export async function createRecommendationChart(recommendation) {
   text(png, "EMA200", chart.left + 210, height - 54, COLORS.purple, 2);
   text(png, "AUTO CHART FROM OKX CANDLES", chart.left + 420, height - 54, COLORS.muted, 2);
 
-  return PNG.sync.write(png);
+  if (process.env.CHART_DEBUG === "1") console.log("chart: encoding png");
+  const buffer = PNG.sync.write(png);
+  if (process.env.CHART_DEBUG === "1") console.log("chart: done");
+  return buffer;
 }

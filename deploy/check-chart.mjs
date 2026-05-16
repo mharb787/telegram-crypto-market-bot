@@ -1,5 +1,6 @@
 import { createRecommendationChart } from "../src/chart.js";
 
+process.env.CHART_DEBUG = "1";
 console.log("chart check start");
 const buffer = await createRecommendationChart({
   symbol: "BTC",
