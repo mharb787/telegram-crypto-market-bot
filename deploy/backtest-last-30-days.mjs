@@ -114,7 +114,7 @@ function profitUsdt(entry, exit) {
 const until = Date.now() - OFFSET_DAYS * 24 * 60 * 60 * 1000;
 const since = until - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const warmupSince = since - 220 * 4 * 60 * 60 * 1000;
-const dailyWarmupSince = since - 200 * 24 * 60 * 60 * 1000;
+const dailyWarmupSince = since - 60 * 24 * 60 * 60 * 1000;
 const all = {};
 const allDaily = {};
 
@@ -152,7 +152,7 @@ async function getBinanceDailyCandles(symbol, startTime, endTime) {
 }
 
 function buildDailyEma200Series(dailyCandles) {
-  const period = 200;
+  const period = 50;
   if (dailyCandles.length < period) return [];
   const multiplier = 2 / (period + 1);
   let val = dailyCandles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;
