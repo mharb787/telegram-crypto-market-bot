@@ -2,13 +2,14 @@ import { execSync } from "node:child_process";
 
 const MONTHS = Number(process.env.BACKTEST_MONTHS || 8);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
+const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 
 const results = [];
 
 process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر...\n\n`);
 
 for (let i = MONTHS - 1; i >= 0; i--) {
-  const env = { ...process.env, BACKTEST_OFFSET_DAYS: String(i * 30), BACKTEST_TRADE_USDT: String(TRADE_USDT) };
+  const env = { ...process.env, BACKTEST_OFFSET_DAYS: String(i * 30), BACKTEST_TRADE_USDT: String(TRADE_USDT), BACKTEST_TARGET: String(TARGET) };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
   const output = execSync("node deploy/backtest-last-30-days.mjs", { env }).toString();
   results.push(JSON.parse(output));
@@ -82,4 +83,5 @@ console.log("═".repeat(W) + "\n");
 
 console.log("  العملات:", results[0]?.symbols?.join(", ") ?? "—");
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
+console.log("  الهدف المستخدم: TP" + TARGET);
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");

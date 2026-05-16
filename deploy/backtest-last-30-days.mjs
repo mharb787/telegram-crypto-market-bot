@@ -6,6 +6,7 @@ const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
+const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -79,12 +80,13 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   const atrStop = current - currentAtr * stopAtr;
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * targetAtr;
+  const target2 = current + currentAtr * targetAtr * 1.55;
   let action = "انتظار";
   if (confidence >= 87) action = "شراء صريح";
   else if (confidence >= 82) action = "شراء مشروط";
   else if (confidence >= 68) action = "مراقبة للشراء";
   else if (confidence <= 45) action = "تجنب";
-  return { symbol, action, confidence, entry: current, stop, target1, timestamp: candles.at(-1).timestamp };
+  return { symbol, action, confidence, entry: current, stop, target1, target2, timestamp: candles.at(-1).timestamp };
 }
 
 function shouldEnter(signal) {
@@ -95,11 +97,12 @@ function shouldEnter(signal) {
 }
 
 function settle(signal, futureCandles) {
+  const target = TARGET === 2 ? signal.target2 : signal.target1;
   for (const candle of futureCandles) {
     const hitStop = candle.low <= signal.stop;
-    const hitTarget = candle.high >= signal.target1;
+    const hitTarget = candle.high >= target;
     if (hitStop && hitTarget) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp, ambiguous: true };
-    if (hitTarget) return { status: "win", exit: signal.target1, timestamp: candle.timestamp };
+    if (hitTarget) return { status: "win", exit: target, timestamp: candle.timestamp };
     if (hitStop) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
   }
   const last = futureCandles.at(-1);
