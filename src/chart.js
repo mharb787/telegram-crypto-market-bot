@@ -36,26 +36,10 @@ function fillRect(png, x, y, w, h, color) {
 }
 
 function line(png, x0, y0, x1, y1, color) {
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-  let x = Math.round(x0);
-  let y = Math.round(y0);
-
-  while (true) {
-    setPixel(png, x, y, color);
-    if (x === Math.round(x1) && y === Math.round(y1)) break;
-    const e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      x += sx;
-    }
-    if (e2 < dx) {
-      err += dx;
-      y += sy;
-    }
+  const steps = Math.max(Math.abs(Math.round(x1 - x0)), Math.abs(Math.round(y1 - y0)), 1);
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    setPixel(png, Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t), color);
   }
 }
 
