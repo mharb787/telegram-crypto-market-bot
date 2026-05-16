@@ -4,6 +4,7 @@ import { OkxClient } from "../src/okx.js";
 const SYMBOLS = ["BTC", "ETH", "BNB", "XRP", "SOL"];
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
+const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
 
 function clamp(value, min, max) {
@@ -112,10 +113,12 @@ function profitUsdt(entry, exit) {
 
 const okx = new OkxClient();
 const limit = 300;
-const since = Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+const until = Date.now() - OFFSET_DAYS * 24 * 60 * 60 * 1000;
+const since = until - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const all = {};
 for (const symbol of SYMBOLS) {
-  all[symbol] = (await okx.getCandles(symbol, "4H", limit)).filter((candle) => candle.timestamp >= since - 220 * 4 * 60 * 60 * 1000);
+  all[symbol] = (await okx.getCandles(symbol, "4H", limit))
+    .filter((candle) => candle.timestamp >= since - 220 * 4 * 60 * 60 * 1000 && candle.timestamp <= until);
 }
 
 const trades = [];
@@ -124,7 +127,7 @@ const btcCandles = all.BTC;
 for (const symbol of SYMBOLS) {
   const candles = all[symbol];
   for (let i = startIndex; i < candles.length - 1; i += 1) {
-    if (candles[i].timestamp < since) continue;
+    if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
@@ -157,6 +160,9 @@ const bySymbol = Object.fromEntries(SYMBOLS.map((symbol) => {
 console.log(JSON.stringify({
   mode: MODE,
   days: LOOKBACK_DAYS,
+  offsetDays: OFFSET_DAYS,
+  from: new Date(since).toISOString(),
+  until: new Date(until).toISOString(),
   tradeUsdt: TRADE_USDT,
   symbols: SYMBOLS,
   totalTrades: trades.length,
