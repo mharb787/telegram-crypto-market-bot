@@ -123,7 +123,8 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
   const target2 = current + currentAtr * profile.targetAtr * 1.55;
 
   let action = "انتظار";
-  if (confidence >= 78) action = "شراء مشروط";
+  if (confidence >= 82) action = "شراء صريح";
+  else if (confidence >= 78) action = "شراء مشروط";
   else if (confidence >= 65) action = "مراقبة للشراء";
   else if (confidence <= 42) action = "تجنب";
 

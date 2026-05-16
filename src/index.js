@@ -38,9 +38,10 @@ function envNumber(name, fallback) {
 const config = {
   token: process.env.TELEGRAM_BOT_TOKEN,
   chatId: process.env.TELEGRAM_CHAT_ID,
-  analysisIntervalMinutes: envNumber("ANALYSIS_INTERVAL_MINUTES", 30),
+  analysisIntervalMinutes: envNumber("ANALYSIS_INTERVAL_MINUTES", 1),
   reportIntervalHours: envNumber("REPORT_INTERVAL_HOURS", 6),
   minConfidenceToAlert: envNumber("MIN_CONFIDENCE_TO_ALERT", 68),
+  strongBuyCooldownMinutes: envNumber("STRONG_BUY_COOLDOWN_MINUTES", 60),
   minTradeUsdt: envNumber("MIN_TRADE_USDT", 5),
   maxTradeUsdt: envNumber("MAX_TRADE_USDT", 500),
   maxPriceDriftPercent: envNumber("MAX_PRICE_DRIFT_PERCENT", 0.5),
@@ -115,20 +116,46 @@ async function sendRecommendationMessages(report) {
   }
 }
 
-async function runCycle({ forceReport = false, send = true } = {}) {
+async function sendStrongBuyAlerts(report) {
+  const cooldowns = await readJson("alert-cooldowns.json", {});
+  const now = Date.now();
+  const nextCooldowns = { ...cooldowns };
+  const strongBuys = report.results.filter((item) => !item.error && item.action === "شراء صريح");
+
+  for (const item of strongBuys) {
+    const lastSentAt = nextCooldowns[item.symbol] ? new Date(nextCooldowns[item.symbol]).getTime() : 0;
+    const elapsedMinutes = (now - lastSentAt) / 60000;
+    if (elapsedMinutes < config.strongBuyCooldownMinutes) continue;
+
+    const recommendation = toTradeRecommendation(item);
+    await saveTradeRecommendation(recommendation);
+    await bot.sendMessage(`تنبيه شراء صريح\n\n${formatRecommendationMessage(recommendation)}`, {
+      reply_markup: {
+        inline_keyboard: [[
+          {
+            text: `ابدأ صفقة ${recommendation.symbol} حسب التوصية`,
+            callback_data: `trade:${recommendation.id}`
+          }
+        ]]
+      }
+    });
+    nextCooldowns[item.symbol] = new Date(now).toISOString();
+  }
+
+  await writeJson("alert-cooldowns.json", nextCooldowns);
+}
+
+async function runCycle({ forceReport = false, send = true, manual = false } = {}) {
   await reviewOpenRecommendations();
   await tuneStrategyFromHistory();
   const report = await analyzeMarket();
   await rememberRecommendations(report.results);
 
-  const valid = report.results.filter((item) => !item.error);
-  const strongest = valid.reduce((best, item) => (item.confidence > (best?.confidence ?? 0) ? item : best), null);
-  const shouldSendReport = forceReport || Date.now() - lastReportAt >= config.reportIntervalHours * 60 * 60 * 1000;
-  const shouldAlert = strongest && strongest.confidence >= config.minConfidenceToAlert;
-
-  if (send && (shouldSendReport || shouldAlert)) {
+  if (send && (manual || forceReport)) {
     await sendRecommendationMessages(report);
     lastReportAt = Date.now();
+  } else if (send) {
+    await sendStrongBuyAlerts(report);
   }
 
   return report;
@@ -223,6 +250,9 @@ async function handleCommand(text, message) {
     await bot.sendMessage([
       "حالة الاستراتيجية والتداول:",
       `أقل ثقة للتنبيه: ${strategy.minConfidenceToAlert}`,
+      `الفحص التلقائي الصامت: كل ${config.analysisIntervalMinutes} دقيقة`,
+      `التنبيه التلقائي: شراء صريح فقط`,
+      `منع تكرار تنبيه نفس العملة: ${config.strongBuyCooldownMinutes} دقيقة`,
       `OKX API: ${okx.hasCredentials() ? "مربوط" : "غير مربوط"}`,
       `حد مبلغ الصفقة: ${config.minTradeUsdt} - ${config.maxTradeUsdt} USDT`,
       `أقصى تغير سعر قبل التأكيد: ${config.maxPriceDriftPercent}%`,
@@ -327,8 +357,7 @@ async function main() {
     return;
   }
 
-  await bot.sendMessage("تم تشغيل بوت تحليل وتداول الكريبتو.");
-  await runCycle({ forceReport: true });
+  await runCycle();
 
   setInterval(() => {
     runCycle().catch((error) => console.error(error));
