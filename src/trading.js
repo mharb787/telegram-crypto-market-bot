@@ -14,7 +14,7 @@ function formatUsd(value, digits = 4) {
 }
 
 export function isExecutableRecommendation(recommendation) {
-  return recommendation && recommendation.confidence >= 65 && ["شراء مشروط", "مراقبة للشراء"].includes(recommendation.action);
+  return recommendation && recommendation.action !== "تجنب";
 }
 
 export async function saveTradeRecommendation(recommendation) {
@@ -55,7 +55,7 @@ export function validateTradeAmount(amount, config) {
 
 export async function checkTradeReadiness({ recommendation, amountUsdt, config }) {
   if (!isExecutableRecommendation(recommendation)) {
-    return { ok: false, message: "هذه التوصية غير قابلة للتنفيذ الآن لأنها ليست شراء مشروط أو مراقبة للشراء." };
+    return { ok: false, message: "هذه التوصية غير قابلة للتنفيذ الآن لأن حالة العملة هي تجنب." };
   }
 
   const ageMinutes = (Date.now() - new Date(recommendation.createdAt).getTime()) / 60000;
