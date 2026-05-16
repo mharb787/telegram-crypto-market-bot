@@ -79,10 +79,10 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * targetAtr;
   let action = "انتظار";
-  if (confidence >= 82) action = "شراء صريح";
-  else if (confidence >= 78) action = "شراء مشروط";
-  else if (confidence >= 65) action = "مراقبة للشراء";
-  else if (confidence <= 42) action = "تجنب";
+  if (confidence >= 87) action = "شراء صريح";
+  else if (confidence >= 82) action = "شراء مشروط";
+  else if (confidence >= 68) action = "مراقبة للشراء";
+  else if (confidence <= 45) action = "تجنب";
   return { symbol, action, confidence, entry: current, stop, target1, timestamp: candles.at(-1).timestamp };
 }
 
