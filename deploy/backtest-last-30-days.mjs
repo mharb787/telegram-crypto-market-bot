@@ -1,5 +1,4 @@
 import { ema, rsi, macd, bollinger, atr, supportResistance, percentChange } from "../src/indicators.js";
-import { OkxClient } from "../src/okx.js";
 
 const SYMBOLS = ["BTC", "ETH", "BNB", "XRP", "SOL"];
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
@@ -111,14 +110,33 @@ function profitUsdt(entry, exit) {
   return TRADE_USDT * ((exit - entry) / entry);
 }
 
-const okx = new OkxClient();
-const limit = 300;
 const until = Date.now() - OFFSET_DAYS * 24 * 60 * 60 * 1000;
 const since = until - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+const warmupSince = since - 220 * 4 * 60 * 60 * 1000;
 const all = {};
+
+async function getBinanceCandles(symbol, startTime, endTime) {
+  const url = new URL("https://api.binance.com/api/v3/klines");
+  url.searchParams.set("symbol", `${symbol}USDT`);
+  url.searchParams.set("interval", "4h");
+  url.searchParams.set("limit", "1000");
+  url.searchParams.set("startTime", String(startTime));
+  url.searchParams.set("endTime", String(endTime));
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Binance candles failed for ${symbol}: ${response.status}`);
+  const rows = await response.json();
+  return rows.map((row) => ({
+    timestamp: Number(row[0]),
+    open: Number(row[1]),
+    high: Number(row[2]),
+    low: Number(row[3]),
+    close: Number(row[4]),
+    volume: Number(row[5])
+  }));
+}
+
 for (const symbol of SYMBOLS) {
-  all[symbol] = (await okx.getCandles(symbol, "4H", limit))
-    .filter((candle) => candle.timestamp >= since - 220 * 4 * 60 * 60 * 1000 && candle.timestamp <= until);
+  all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
 }
 
 const trades = [];
@@ -180,6 +198,7 @@ console.log(JSON.stringify({
     "stop loss at strategy stop",
     "if TP and SL hit same candle, counted as loss",
     "fees/slippage not included",
-    "current top 5 symbols used"
+    "current top 5 symbols used",
+    "historical candles from Binance 4H endpoint"
   ]
 }, null, 2));
