@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "minConfidenceToAlert": 68,
+  "maxRecommendationsPerReport": 5,
+  "riskProfiles": {
+    "low": { "stopAtr": 1.4, "targetAtr": 2.0 },
+    "medium": { "stopAtr": 1.8, "targetAtr": 2.8 },
+    "high": { "stopAtr": 2.3, "targetAtr": 3.6 }
+  },
+  "weights": {
+    "trend": 24,
+    "momentum": 19,
+    "volume": 15,
+    "marketContext": 18,
+    "bitcoinFilter": 16,
+    "riskControl": 8
+  },
+  "sessionMultipliers": {
+    "asia_open": 0.94,
+    "asia_close": 0.96,
+    "europe_open": 0.95,
+    "europe_close": 0.96,
+    "us_open": 0.9,
+    "us_close": 0.94,
+    "normal": 1
+  },
+  "learning": {
+    "enabled": true,
+    "reviewAfterHours": 12,
+    "minSamplesBeforeTuning": 8,
+    "maxWeightStep": 2,
+    "minWeight": 5,
+    "maxWeight": 35
+  }
+}
