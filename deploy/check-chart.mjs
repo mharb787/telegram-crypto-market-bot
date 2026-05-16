@@ -1,5 +1,6 @@
 import { createRecommendationChart } from "../src/chart.js";
 
+console.log("chart check start");
 const buffer = await createRecommendationChart({
   symbol: "BTC",
   name: "Bitcoin",
