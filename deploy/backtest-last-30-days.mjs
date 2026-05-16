@@ -173,14 +173,6 @@ function getEma50At(series, timestamp) {
   return result;
 }
 
-function isEma50Rising(series, timestamp) {
-  const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
-  const current = getEma50At(series, timestamp);
-  const tenDaysAgo = getEma50At(series, timestamp - tenDaysMs);
-  if (current === null || tenDaysAgo === null) return true;
-  return current > tenDaysAgo;
-}
-
 all[BTC_SYMBOL] = await getBinanceCandles(BTC_SYMBOL, warmupSince, until);
 for (const symbol of SYMBOLS) {
   all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
@@ -200,7 +192,6 @@ for (const symbol of SYMBOLS) {
     if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
     const dailyEma50 = getEma50At(ema200Series[symbol], candles[i].timestamp);
     if (dailyEma50 !== null && candles[i].close < dailyEma50) continue;
-    if (!isEma50Rising(ema200Series[symbol], candles[i].timestamp)) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);

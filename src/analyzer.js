@@ -117,13 +117,10 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
 
   const totalWeight = Object.values(strategy.weights).reduce((sum, value) => sum + value, 0);
   const weighted = Object.entries(factors).reduce((sum, [key, value]) => sum + ((value + 1) / 2) * strategy.weights[key], 0);
-  const dailyCloses = candlesDaily.map((c) => c.close);
-  const dailyEma50 = ema(dailyCloses, 50);
-  const dailyEma50TenAgo = ema(dailyCloses.slice(0, -10), 50);
+  const dailyEma50 = ema(candlesDaily.map((c) => c.close), 50);
   const aboveDailyEma50 = dailyEma50 !== null ? current > dailyEma50 : true;
-  const ema50Rising = dailyEma50 !== null && dailyEma50TenAgo !== null ? dailyEma50 > dailyEma50TenAgo : true;
   const rawConfidence = clamp(Math.round((weighted / totalWeight) * 100 * sessionMultiplier), 0, 100);
-  const confidence = (aboveDailyEma50 && ema50Rising) ? rawConfidence : Math.min(rawConfidence, 42);
+  const confidence = aboveDailyEma50 ? rawConfidence : Math.min(rawConfidence, 42);
   const risk = confidence >= 78 && !session.isHighVolatilityWindow ? "medium" : confidence >= 65 ? "medium" : "high";
   const profile = strategy.riskProfiles[risk] ?? strategy.riskProfiles.medium;
   const atrStop = current - currentAtr * profile.stopAtr;
