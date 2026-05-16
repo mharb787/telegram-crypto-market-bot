@@ -34,7 +34,24 @@ export class TelegramBot {
     }
   }
 
-  async poll(handler) {
+  async answerCallbackQuery(callbackQueryId, text = "") {
+    if (this.dryRun || !this.token) return;
+    const response = await fetch(this.apiUrl("answerCallbackQuery"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+        show_alert: false
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram answerCallbackQuery failed: ${response.status} ${await response.text()}`);
+    }
+  }
+
+  async poll({ onMessage, onCallback }) {
     if (!this.token) return;
     const response = await fetch(this.apiUrl(`getUpdates?timeout=25&offset=${this.offset}`));
     if (!response.ok) {
@@ -44,7 +61,8 @@ export class TelegramBot {
     for (const update of payload.result ?? []) {
       this.offset = update.update_id + 1;
       const message = update.message?.text;
-      if (message) await handler(message, update.message);
+      if (message && onMessage) await onMessage(message, update.message);
+      if (update.callback_query && onCallback) await onCallback(update.callback_query);
     }
   }
 }
