@@ -114,7 +114,9 @@ function profitUsdt(entry, exit) {
 const until = Date.now() - OFFSET_DAYS * 24 * 60 * 60 * 1000;
 const since = until - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const warmupSince = since - 220 * 4 * 60 * 60 * 1000;
+const dailyWarmupSince = since - 200 * 24 * 60 * 60 * 1000;
 const all = {};
+const allDaily = {};
 
 async function getBinanceCandles(symbol, startTime, endTime) {
   const url = new URL("https://api.binance.com/api/v3/klines");
@@ -136,10 +138,50 @@ async function getBinanceCandles(symbol, startTime, endTime) {
   }));
 }
 
+async function getBinanceDailyCandles(symbol, startTime, endTime) {
+  const url = new URL("https://api.binance.com/api/v3/klines");
+  url.searchParams.set("symbol", `${symbol}USDT`);
+  url.searchParams.set("interval", "1d");
+  url.searchParams.set("limit", "1000");
+  url.searchParams.set("startTime", String(startTime));
+  url.searchParams.set("endTime", String(endTime));
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Binance daily candles failed for ${symbol}: ${response.status}`);
+  const rows = await response.json();
+  return rows.map((row) => ({ timestamp: Number(row[0]), close: Number(row[4]) }));
+}
+
+function buildDailyEma200Series(dailyCandles) {
+  const period = 200;
+  if (dailyCandles.length < period) return [];
+  const multiplier = 2 / (period + 1);
+  let val = dailyCandles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;
+  const result = [{ timestamp: dailyCandles[period - 1].timestamp, value: val }];
+  for (let i = period; i < dailyCandles.length; i++) {
+    val = dailyCandles[i].close * multiplier + val * (1 - multiplier);
+    result.push({ timestamp: dailyCandles[i].timestamp, value: val });
+  }
+  return result;
+}
+
+function getEma200At(series, timestamp) {
+  let result = null;
+  for (const entry of series) {
+    if (entry.timestamp <= timestamp) result = entry.value;
+    else break;
+  }
+  return result;
+}
+
 all[BTC_SYMBOL] = await getBinanceCandles(BTC_SYMBOL, warmupSince, until);
 for (const symbol of SYMBOLS) {
   all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
+  allDaily[symbol] = await getBinanceDailyCandles(symbol, dailyWarmupSince, until);
 }
+
+const ema200Series = Object.fromEntries(
+  SYMBOLS.map((symbol) => [symbol, buildDailyEma200Series(allDaily[symbol])])
+);
 
 const trades = [];
 const startIndex = 210;
@@ -148,6 +190,8 @@ for (const symbol of SYMBOLS) {
   const candles = all[symbol];
   for (let i = startIndex; i < candles.length - 1; i += 1) {
     if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
+    const dailyEma200 = getEma200At(ema200Series[symbol], candles[i].timestamp);
+    if (dailyEma200 !== null && candles[i].close < dailyEma200) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);

@@ -65,6 +65,7 @@ async function fetchBinanceCandles(symbol, interval = "1h", limit = 220) {
 async function buildAssetAnalysis(asset, strategy, bitcoinState) {
   const candles1h = await fetchBinanceCandles(asset.symbol, "1h", 220);
   const candles4h = await fetchBinanceCandles(asset.symbol, "4h", 220);
+  const candlesDaily = await fetchBinanceCandles(asset.symbol, "1d", 220);
   const closes = candles4h.map((candle) => candle.close);
   const volumes = candles4h.map((candle) => candle.volume);
   const current = closes.at(-1);
@@ -116,7 +117,10 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
 
   const totalWeight = Object.values(strategy.weights).reduce((sum, value) => sum + value, 0);
   const weighted = Object.entries(factors).reduce((sum, [key, value]) => sum + ((value + 1) / 2) * strategy.weights[key], 0);
-  const confidence = clamp(Math.round((weighted / totalWeight) * 100 * sessionMultiplier), 0, 100);
+  const dailyEma200 = ema(candlesDaily.map((c) => c.close), 200);
+  const aboveDailyEma200 = dailyEma200 !== null ? current > dailyEma200 : true;
+  const rawConfidence = clamp(Math.round((weighted / totalWeight) * 100 * sessionMultiplier), 0, 100);
+  const confidence = aboveDailyEma200 ? rawConfidence : Math.min(rawConfidence, 42);
   const risk = confidence >= 78 && !session.isHighVolatilityWindow ? "medium" : confidence >= 65 ? "medium" : "high";
   const profile = strategy.riskProfiles[risk] ?? strategy.riskProfiles.medium;
   const atrStop = current - currentAtr * profile.stopAtr;
