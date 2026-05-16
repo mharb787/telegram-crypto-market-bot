@@ -1,6 +1,6 @@
 import { analyzeMarket, formatReport, rememberRecommendations, reviewOpenRecommendations, tuneStrategyFromHistory } from "./analyzer.js";
 import { TelegramBot } from "./telegram.js";
-import { loadStrategy, readJson } from "./storage.js";
+import { loadStrategy, readJson, writeJson } from "./storage.js";
 import fs from "node:fs";
 
 function loadDotEnv() {
@@ -58,6 +58,7 @@ async function runCycle({ forceReport = false, send = true } = {}) {
 async function handleCommand(text, message) {
   if (message.chat?.id && !config.chatId) {
     bot.chatId = message.chat.id;
+    await writeJson("runtime-config.json", { chatId: String(message.chat.id), learnedAt: new Date().toISOString() });
   }
 
   const command = text.trim().split(/\s+/)[0].toLowerCase();
@@ -101,6 +102,11 @@ async function handleCommand(text, message) {
 async function main() {
   if (!config.token && !config.dryRun) {
     throw new Error("TELEGRAM_BOT_TOKEN is required unless DRY_RUN=true or --once is used.");
+  }
+
+  const runtimeConfig = await readJson("runtime-config.json", {});
+  if (!bot.chatId && runtimeConfig.chatId) {
+    bot.chatId = runtimeConfig.chatId;
   }
 
   if (process.argv.includes("--once")) {
