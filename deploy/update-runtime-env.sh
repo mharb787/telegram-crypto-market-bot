@@ -23,5 +23,7 @@ ensure_env MAX_TRADE_USDT "500"
 ensure_env MAX_PRICE_DRIFT_PERCENT "0.5"
 ensure_env MAX_RECOMMENDATION_AGE_MINUTES "20"
 ensure_env TRAIL_ATR "1.0"
+ensure_env AUTO_TRADE "false"
+ensure_env AUTO_TRADE_USDT "100"
 
 chmod 600 .env

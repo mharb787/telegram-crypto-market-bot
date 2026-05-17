@@ -47,6 +47,8 @@ const config = {
   maxTradeUsdt: envNumber("MAX_TRADE_USDT", 500),
   maxPriceDriftPercent: envNumber("MAX_PRICE_DRIFT_PERCENT", 0.5),
   maxRecommendationAgeMinutes: envNumber("MAX_RECOMMENDATION_AGE_MINUTES", 20),
+  autoTrade: process.env.AUTO_TRADE === "true",
+  autoTradeUsdt: envNumber("AUTO_TRADE_USDT", 100),
   dryRun: process.env.DRY_RUN === "true" || process.argv.includes("--once")
 };
 
@@ -144,6 +146,21 @@ async function sendStrongBuyAlerts(report) {
     await saveTradeRecommendation(recommendation);
     await sendRecommendation(recommendation, "تنبيه شراء صريح");
     nextCooldowns[item.symbol] = new Date(now).toISOString();
+
+    if (config.autoTrade) {
+      try {
+        const okx = new OkxClient();
+        if (!okx.hasCredentials()) {
+          await bot.sendMessage(`تنبيه: AUTO_TRADE مفعّل لكن OKX API غير مربوط.`);
+        } else {
+          const ticker = await okx.getTicker(recommendation.symbol);
+          const trade = await executeTrade({ recommendation, amountUsdt: config.autoTradeUsdt, ticker });
+          await bot.sendMessage(`تم فتح صفقة تلقائية:\n${formatTradeOpened(trade)}`);
+        }
+      } catch (error) {
+        await bot.sendMessage(`فشل التنفيذ التلقائي لـ ${recommendation.symbol}: ${error.message}`);
+      }
+    }
   }
 
   await writeJson("alert-cooldowns.json", nextCooldowns);
