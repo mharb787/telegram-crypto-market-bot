@@ -10,6 +10,7 @@ const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
+const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 
 function clamp(value, min, max) {
@@ -84,12 +85,13 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   const atrStop = current - currentAtr * stopAtr;
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * targetAtr;
+  const target2 = current + currentAtr * targetAtr * 1.55;
   let action = "انتظار";
   if (confidence >= 82) action = "شراء صريح";
   else if (confidence >= 78) action = "شراء مشروط";
   else if (confidence >= 65) action = "مراقبة للشراء";
   else if (confidence <= 42) action = "تجنب";
-  return { symbol, action, confidence, entry: current, stop, target1, atr: currentAtr, timestamp: candles.at(-1).timestamp };
+  return { symbol, action, confidence, entry: current, stop, target1, target2, atr: currentAtr, timestamp: candles.at(-1).timestamp };
 }
 
 function shouldEnter(signal) {
@@ -112,24 +114,28 @@ function settle(signal, futureCandles) {
   return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
 }
 
-function settleTrailing(signal, futureCandles, trailAtr) {
-  let tp1Reached = false;
+function settleTrailing(signal, futureCandles, trailAtr, trailAfter = "tp1") {
+  const activationPrice = trailAfter === "tp2" ? signal.target2 : signal.target1;
+  let activated = false;
   let peak = signal.entry;
   let trailingStop = signal.stop;
 
   for (const candle of futureCandles) {
-    if (!tp1Reached) {
+    if (!activated) {
       if (candle.low <= signal.stop) {
         return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
       }
-      if (candle.high >= signal.target1) {
-        tp1Reached = true;
-        peak = signal.target1;
-        trailingStop = signal.target1; // trailing يبدأ من TP1
+      if (trailAfter === "tp2" && candle.high >= signal.target1 && candle.high < signal.target2) {
+        // بين TP1 و TP2 — الصفقة رابحة جزئياً لكن لم يتفعل trailing بعد
+      }
+      if (candle.high >= activationPrice) {
+        activated = true;
+        peak = activationPrice;
+        trailingStop = activationPrice;
       }
     }
 
-    if (tp1Reached) {
+    if (activated) {
       if (candle.high > peak) {
         peak = candle.high;
         const newTrail = peak - signal.atr * trailAtr;
@@ -143,9 +149,7 @@ function settleTrailing(signal, futureCandles, trailAtr) {
 
   const last = futureCandles.at(-1);
   const exit = last?.close ?? signal.entry;
-  if (tp1Reached) {
-    return { status: "win", exit, timestamp: last?.timestamp };
-  }
+  if (activated) return { status: "win", exit, timestamp: last?.timestamp };
   return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
 }
 
@@ -201,7 +205,7 @@ for (const symbol of SYMBOLS) {
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
     if (!shouldEnter(signal)) continue;
-    const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR) : settle(signal, candles.slice(i + 1));
+    const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR, TRAIL_AFTER) : settle(signal, candles.slice(i + 1));
     if (NO_REPEAT && outcome.timestamp) lastExitBySymbol[symbol] = outcome.timestamp;
     trades.push({
       ...signal,

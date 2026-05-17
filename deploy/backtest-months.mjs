@@ -4,11 +4,12 @@ const MONTHS = Number(process.env.BACKTEST_MONTHS || 8);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR || "";
+const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 
 const results = [];
 
-const modeLabel = TRAIL_ATR ? `TRAIL×${TRAIL_ATR}` : `TP${TARGET}`;
+const modeLabel = TRAIL_ATR ? `TRAIL×${TRAIL_ATR}@${TRAIL_AFTER.toUpperCase()}` : `TP${TARGET}`;
 process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر... [${modeLabel}]\n\n`);
 
 for (let i = MONTHS - 1; i >= 0; i--) {
@@ -17,7 +18,8 @@ for (let i = MONTHS - 1; i >= 0; i--) {
     BACKTEST_OFFSET_DAYS: String(i * 30),
     BACKTEST_TRADE_USDT: String(TRADE_USDT),
     BACKTEST_TARGET: String(TARGET),
-    BACKTEST_NO_REPEAT: NO_REPEAT ? "true" : "false"
+    BACKTEST_NO_REPEAT: NO_REPEAT ? "true" : "false",
+    BACKTEST_TRAIL_AFTER: TRAIL_AFTER
   };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
   try {
