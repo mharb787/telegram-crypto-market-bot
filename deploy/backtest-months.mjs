@@ -89,7 +89,52 @@ console.log(
 console.log("═".repeat(W) + "\n");
 
 const symbols = results[0]?.symbols ?? [];
-console.log("  العملات:", symbols.join(", ") || "—");
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
 console.log("  الهدف: TP" + TARGET);
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
+
+// Per-symbol breakdown
+const symbolStats = {};
+for (const r of results) {
+  for (const [sym, data] of Object.entries(r.bySymbol ?? {})) {
+    if (!symbolStats[sym]) symbolStats[sym] = { trades: 0, wins: 0, losses: 0, open: 0, profit: 0 };
+    symbolStats[sym].trades += data.trades;
+    symbolStats[sym].wins += data.wins;
+    symbolStats[sym].losses += data.losses;
+    symbolStats[sym].open += (data.trades - data.wins - data.losses);
+    symbolStats[sym].profit += data.profit;
+  }
+}
+
+if (Object.keys(symbolStats).length > 0) {
+  console.log("═".repeat(W));
+  console.log("  أداء كل عملة — " + MONTHS + " أشهر");
+  console.log("═".repeat(W));
+  console.log(
+    "  " +
+    "العملة".padEnd(10) +
+    "صفقات".padStart(8) +
+    "ربح".padStart(7) +
+    "خسارة".padStart(8) +
+    "نجاح%".padStart(9) +
+    "الربح الكلي".padStart(13)
+  );
+  console.log("  " + "─".repeat(W));
+  const sorted = Object.entries(symbolStats).sort((a, b) => b[1].profit - a[1].profit);
+  for (const [sym, s] of sorted) {
+    const wr = (s.wins + s.losses) > 0 ? ((s.wins / (s.wins + s.losses)) * 100).toFixed(1) + "%" : "—";
+    const pr = (s.profit >= 0 ? "+" : "") + "$" + s.profit.toFixed(2);
+    const flag = s.profit >= 0 ? " ✅" : " ❌";
+    console.log(
+      "  " +
+      sym.padEnd(10) +
+      String(s.trades).padStart(8) +
+      String(s.wins).padStart(7) +
+      String(s.losses).padStart(8) +
+      wr.padStart(9) +
+      pr.padStart(13) +
+      flag
+    );
+  }
+  console.log("═".repeat(W) + "\n");
+}
