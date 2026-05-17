@@ -3,10 +3,12 @@ import { execSync } from "node:child_process";
 const MONTHS = Number(process.env.BACKTEST_MONTHS || 8);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const TARGET = Number(process.env.BACKTEST_TARGET || 1);
+const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR || "";
 
 const results = [];
 
-process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر... [TP${TARGET}]\n\n`);
+const modeLabel = TRAIL_ATR ? `TRAIL×${TRAIL_ATR}` : `TP${TARGET}`;
+process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر... [${modeLabel}]\n\n`);
 
 for (let i = MONTHS - 1; i >= 0; i--) {
   const env = {
@@ -93,7 +95,7 @@ console.log("═".repeat(W) + "\n");
 
 const symbols = results[0]?.symbols ?? [];
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
-console.log("  الهدف: TP" + TARGET);
+console.log("  الهدف: " + modeLabel);
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
 
 // Per-symbol breakdown

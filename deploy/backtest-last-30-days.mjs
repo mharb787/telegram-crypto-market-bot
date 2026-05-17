@@ -9,6 +9,7 @@ const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
+const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -87,7 +88,7 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   else if (confidence >= 78) action = "شراء مشروط";
   else if (confidence >= 65) action = "مراقبة للشراء";
   else if (confidence <= 42) action = "تجنب";
-  return { symbol, action, confidence, entry: current, stop, target1, timestamp: candles.at(-1).timestamp };
+  return { symbol, action, confidence, entry: current, stop, target1, atr: currentAtr, timestamp: candles.at(-1).timestamp };
 }
 
 function shouldEnter(signal) {
@@ -104,6 +105,25 @@ function settle(signal, futureCandles) {
     if (hitStop && hitTarget) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp, ambiguous: true };
     if (hitTarget) return { status: "win", exit: signal.target1, timestamp: candle.timestamp };
     if (hitStop) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
+  }
+  const last = futureCandles.at(-1);
+  const exit = last?.close ?? signal.entry;
+  return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
+}
+
+function settleTrailing(signal, futureCandles, trailAtr) {
+  let peak = signal.entry;
+  let trailingStop = signal.stop;
+  for (const candle of futureCandles) {
+    if (candle.high > peak) {
+      peak = candle.high;
+      const newTrail = peak - signal.atr * trailAtr;
+      if (newTrail > trailingStop) trailingStop = newTrail;
+    }
+    if (candle.low <= trailingStop) {
+      const status = trailingStop > signal.entry ? "win" : "loss";
+      return { status, exit: trailingStop, timestamp: candle.timestamp };
+    }
   }
   const last = futureCandles.at(-1);
   const exit = last?.close ?? signal.entry;
@@ -160,7 +180,7 @@ for (const symbol of SYMBOLS) {
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
     if (!shouldEnter(signal)) continue;
-    const outcome = settle(signal, candles.slice(i + 1));
+    const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR) : settle(signal, candles.slice(i + 1));
     trades.push({
       ...signal,
       status: outcome.status,
@@ -187,6 +207,7 @@ const bySymbol = Object.fromEntries(SYMBOLS.map((symbol) => {
 
 console.log(JSON.stringify({
   mode: MODE,
+  trailAtr: TRAIL_ATR,
   days: LOOKBACK_DAYS,
   offsetDays: OFFSET_DAYS,
   from: new Date(since).toISOString(),
