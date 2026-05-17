@@ -15,6 +15,7 @@ const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 const BTC_MIN_SCORE = process.env.BACKTEST_BTC_FILTER ? Number(process.env.BACKTEST_BTC_FILTER) : 0;
 const DYNAMIC_FILTER = process.env.BACKTEST_DYNAMIC_FILTER === "true";
+const MIN_CONFIDENCE = process.env.BACKTEST_MIN_CONFIDENCE ? Number(process.env.BACKTEST_MIN_CONFIDENCE) : null;
 
 function getMonthlyBtcColor(btcCandles, timestamp) {
   const date = new Date(timestamp);
@@ -26,6 +27,7 @@ function getMonthlyBtcColor(btcCandles, timestamp) {
 }
 
 function getDynamicThreshold(btcCandles, timestamp, recentTrades) {
+  if (MIN_CONFIDENCE !== null) return MIN_CONFIDENCE;
   if (!DYNAMIC_FILTER) return 82;
   const closed = recentTrades.filter((t) => t.status === "win" || t.status === "loss");
   if (closed.length >= 5) {
