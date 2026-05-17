@@ -264,6 +264,11 @@ async function handleCommand(text, message) {
     return;
   }
 
+  if (command === "/chatid") {
+    await bot.sendMessageTo(message.chat.id, `Chat ID: ${message.chat.id}`);
+    return;
+  }
+
   if (command === "/report") {
     const report = await runCycle({ forceReport: true, send: false });
     await sendRecommendationMessages(report);

@@ -17,11 +17,21 @@ export class TelegramBot {
       return;
     }
 
+    return this.sendMessageTo(this.chatId, text, options);
+  }
+
+  async sendMessageTo(chatId, text, options = {}) {
+    if (this.dryRun || !this.token || !chatId) {
+      console.log("\n--- TELEGRAM MESSAGE ---\n");
+      console.log(text);
+      return;
+    }
+
     const response = await fetch(this.apiUrl("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        chat_id: this.chatId,
+        chat_id: chatId,
         text,
         parse_mode: "HTML",
         disable_web_page_preview: true,
