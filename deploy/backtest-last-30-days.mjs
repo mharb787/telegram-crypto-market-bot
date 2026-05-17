@@ -230,6 +230,10 @@ const closed = trades.filter((trade) => trade.status === "win" || trade.status =
 const wins = closed.filter((trade) => trade.status === "win");
 const losses = closed.filter((trade) => trade.status === "loss");
 const totalProfit = trades.reduce((sum, trade) => sum + trade.profit, 0);
+const closedWithDuration = closed.filter((t) => t.exitTimestamp && t.timestamp);
+const avgDurationHours = closedWithDuration.length
+  ? closedWithDuration.reduce((sum, t) => sum + (t.exitTimestamp - t.timestamp) / 3600000, 0) / closedWithDuration.length
+  : 0;
 const bySymbol = Object.fromEntries(SYMBOLS.map((symbol) => {
   const rows = trades.filter((trade) => trade.symbol === symbol);
   return [symbol, {
@@ -257,6 +261,7 @@ console.log(JSON.stringify({
   winRate: closed.length ? Number(((wins.length / closed.length) * 100).toFixed(2)) : 0,
   totalProfit: Number(totalProfit.toFixed(2)),
   maxConcurrentTrades: maxConcurrent,
+  avgTradeDurationHours: Number(avgDurationHours.toFixed(1)),
   bySymbol,
   assumptions: [
     "4H candles",

@@ -98,10 +98,14 @@ console.log(
 console.log("═".repeat(W) + "\n");
 
 const maxConcurrent = Math.max(...results.map((r) => r.maxConcurrentTrades ?? 0));
+const totalClosed = results.reduce((sum, r) => sum + (r.closedTrades ?? 0), 0);
+const weightedDuration = results.reduce((sum, r) => sum + (r.avgTradeDurationHours ?? 0) * (r.closedTrades ?? 0), 0);
+const avgDuration = totalClosed > 0 ? (weightedDuration / totalClosed).toFixed(1) : "—";
 const symbols = results[0]?.symbols ?? [];
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
 console.log("  الهدف: " + modeLabel);
 console.log(`  أقصى صفقات مفتوحة في نفس الوقت: ${maxConcurrent} صفقة (${maxConcurrent * TRADE_USDT}$)`);
+console.log(`  متوسط عمر الصفقة: ${avgDuration} ساعة`);
 if (NO_REPEAT) console.log("  وضع: منع التكرار — صفقة واحدة لكل عملة حتى الإغلاق");
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
 
