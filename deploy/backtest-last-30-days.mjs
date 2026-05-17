@@ -1,6 +1,10 @@
 import { ema, rsi, macd, bollinger, atr, supportResistance, percentChange } from "../src/indicators.js";
 
-const SYMBOLS = ["BTC", "ETH", "BNB", "XRP", "SOL"];
+const DEFAULT_TARGET_SYMBOLS = ["XRP", "TRX", "XLM", "HYPE", "TON"];
+const SYMBOLS = (process.env.TARGET_SYMBOLS || DEFAULT_TARGET_SYMBOLS.join(","))
+  .split(",")
+  .map((symbol) => symbol.trim().toUpperCase())
+  .filter(Boolean);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
@@ -136,14 +140,20 @@ async function getBinanceCandles(symbol, startTime, endTime) {
 }
 
 for (const symbol of SYMBOLS) {
-  all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
+  try {
+    all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
+  } catch (error) {
+    console.error(`Skipping ${symbol}: ${error.message}`);
+    all[symbol] = [];
+  }
 }
 
 const trades = [];
 const startIndex = 210;
-const btcCandles = all.BTC;
+const btcCandles = await getBinanceCandles("BTC", warmupSince, until);
 for (const symbol of SYMBOLS) {
   const candles = all[symbol];
+  if (candles.length <= startIndex) continue;
   for (let i = startIndex; i < candles.length - 1; i += 1) {
     if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
@@ -198,7 +208,7 @@ console.log(JSON.stringify({
     "stop loss at strategy stop",
     "if TP and SL hit same candle, counted as loss",
     "fees/slippage not included",
-    "current top 5 symbols used",
+    "symbols from TARGET_SYMBOLS",
     "historical candles from Binance 4H endpoint"
   ]
 }, null, 2));
