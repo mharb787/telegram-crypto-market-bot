@@ -7,6 +7,7 @@ import {
   formatTradeOpened,
   getPendingTrade,
   getTradeRecommendation,
+  monitorExecutedTrades,
   parseTradeAmount,
   saveTradeRecommendation,
   setPendingTrade
@@ -170,6 +171,7 @@ async function sendStrongBuyAlerts(report) {
 async function runCycle({ forceReport = false, send = true, manual = false } = {}) {
   await reviewOpenRecommendations();
   await tuneStrategyFromHistory();
+  await monitorExecutedTrades((msg) => bot.sendMessage(msg)).catch(() => {});
   const report = await analyzeMarket();
   await rememberRecommendations(report.results);
 

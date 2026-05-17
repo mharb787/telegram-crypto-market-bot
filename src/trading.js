@@ -126,6 +126,65 @@ export async function executeTrade({ recommendation, amountUsdt, ticker }) {
   return trade;
 }
 
+export async function monitorExecutedTrades(sendMessage) {
+  const okx = new OkxClient();
+  if (!okx.hasCredentials()) return;
+
+  const trades = await readJson("executed-trades.json", []);
+  const open = trades.filter((t) => !t.closedAt);
+  if (!open.length) return;
+
+  const updated = [...trades];
+
+  for (const trade of open) {
+    try {
+      const instId = `${trade.symbol}-USDT`;
+      let exitPrice = null;
+      let exitReason = null;
+
+      if (trade.trailMode && trade.okx?.trailAlgoId) {
+        const algo = await okx.getAlgoOrderStatus(trade.okx.trailAlgoId, instId);
+        if (algo && algo.state === "filled") {
+          exitPrice = Number(algo.avgPx || algo.triggerPx);
+          exitReason = "trailing stop";
+        }
+      } else {
+        const fills = await okx.getRecentFills(instId, 50);
+        const sellFill = fills.find(
+          (f) => f.side === "sell" && Number(f.ts) > new Date(trade.createdAt).getTime()
+        );
+        if (sellFill) {
+          exitPrice = Number(sellFill.fillPx);
+          exitReason = exitPrice >= trade.target1 ? "take profit" : "stop loss";
+        }
+      }
+
+      if (!exitPrice) continue;
+
+      const pnl = Number((trade.amountUsdt * ((exitPrice - trade.referencePrice) / trade.referencePrice)).toFixed(2));
+      const isWin = pnl > 0;
+      const closedTrade = { ...trade, closedAt: nowIso(), exitPrice, pnl, exitReason };
+
+      const idx = updated.findIndex((t) => t.id === trade.id);
+      if (idx !== -1) updated[idx] = closedTrade;
+
+      const emoji = isWin ? "✅" : "❌";
+      const pnlStr = (pnl >= 0 ? "+" : "") + "$" + Math.abs(pnl).toFixed(2);
+      await sendMessage([
+        `${emoji} صفقة مغلقة: ${trade.symbol}`,
+        `السبب: ${exitReason}`,
+        `سعر الدخول: $${formatUsd(trade.referencePrice)}`,
+        `سعر الخروج: $${formatUsd(exitPrice)}`,
+        `النتيجة: ${pnlStr}`
+      ].join("\n"));
+    } catch {
+      // تجاهل الأخطاء المؤقتة
+    }
+  }
+
+  await writeJson("executed-trades.json", updated);
+}
+
 export function formatTradeOpened(trade) {
   const trailActivation = process.env.TRAIL_AFTER === "tp3" && trade.target3 ? trade.target3
     : process.env.TRAIL_AFTER === "tp2" && trade.target2 ? trade.target2

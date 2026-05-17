@@ -137,6 +137,16 @@ export class OkxClient {
     return data?.[0] ?? null;
   }
 
+  async getRecentFills(instId, limit = 20) {
+    const data = await this.request("GET", `/api/v5/trade/fills?instId=${instId}&limit=${limit}`, null, { auth: true });
+    return data ?? [];
+  }
+
+  async getAlgoOrderStatus(algoId, instId) {
+    const data = await this.request("GET", `/api/v5/trade/orders-algo-history?algoId=${algoId}&instId=${instId}&ordType=move_order_stop`, null, { auth: true });
+    return data?.[0] ?? null;
+  }
+
   async placeTrailingStopAlgo({ instId, sz, activePx, callbackRatio }) {
     const body = {
       instId,
