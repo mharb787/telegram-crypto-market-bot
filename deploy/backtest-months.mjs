@@ -26,7 +26,7 @@ for (let i = MONTHS - 1; i >= 0; i--) {
 
 process.stdout.write(" ".repeat(40) + "\r");
 
-const W = 84;
+const W = 86;
 console.log("\n" + "═".repeat(W));
 console.log(`  BACKTEST SUMMARY — آخر ${MONTHS} أشهر | $${TRADE_USDT}/صفقة | TP${TARGET}`);
 console.log("═".repeat(W));
@@ -34,6 +34,7 @@ console.log(
   "  " +
   "الفترة".padEnd(24) +
   "صفقات".padStart(7) +
+  " │" +
   "ربح".padStart(6) +
   "خسارة".padStart(7) +
   "مفتوحة".padStart(8) +
@@ -62,6 +63,7 @@ for (const r of results) {
     "  " +
     period.padEnd(24) +
     String(r.totalTrades).padStart(7) +
+    " │" +
     String(r.wins).padStart(6) +
     String(r.losses).padStart(7) +
     String(r.open).padStart(8) +
@@ -80,6 +82,7 @@ console.log(
   "  " +
   "TOTAL".padEnd(24) +
   String(totalTrades).padStart(7) +
+  " │" +
   String(totalWins).padStart(6) +
   String(totalLosses).padStart(7) +
   String(totalTrades - totalWins - totalLosses).padStart(8) +
@@ -114,6 +117,7 @@ if (Object.keys(symbolStats).length > 0) {
     "  " +
     "العملة".padEnd(10) +
     "صفقات".padStart(8) +
+    " │" +
     "ربح".padStart(7) +
     "خسارة".padStart(8) +
     "نجاح%".padStart(9) +
@@ -129,6 +133,7 @@ if (Object.keys(symbolStats).length > 0) {
       "  " +
       sym.padEnd(10) +
       String(s.trades).padStart(8) +
+      " │" +
       String(s.wins).padStart(7) +
       String(s.losses).padStart(8) +
       wr.padStart(9) +
