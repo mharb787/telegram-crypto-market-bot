@@ -6,6 +6,7 @@ const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR || "";
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
+const BASE_OFFSET = Number(process.env.BACKTEST_BASE_OFFSET_DAYS || 0);
 
 const results = [];
 
@@ -15,7 +16,7 @@ process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر... [${modeLabel}]
 for (let i = MONTHS - 1; i >= 0; i--) {
   const env = {
     ...process.env,
-    BACKTEST_OFFSET_DAYS: String(i * 30),
+    BACKTEST_OFFSET_DAYS: String(i * 30 + BASE_OFFSET),
     BACKTEST_TRADE_USDT: String(TRADE_USDT),
     BACKTEST_TARGET: String(TARGET),
     BACKTEST_NO_REPEAT: NO_REPEAT ? "true" : "false",
