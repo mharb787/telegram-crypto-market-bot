@@ -12,6 +12,7 @@ const MODE = process.env.BACKTEST_MODE || "strong-buy";
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
+const BTC_MIN_SCORE = process.env.BACKTEST_BTC_FILTER ? Number(process.env.BACKTEST_BTC_FILTER) : 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -203,6 +204,7 @@ for (const symbol of SYMBOLS) {
     if (NO_REPEAT && lastExitBySymbol[symbol] && candles[i].timestamp < lastExitBySymbol[symbol]) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
+    if (BTC_MIN_SCORE > 0 && (btcSignal?.confidence ?? 0) < BTC_MIN_SCORE) continue;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
     if (!shouldEnter(signal)) continue;
     const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR, TRAIL_AFTER) : settle(signal, candles.slice(i + 1));
