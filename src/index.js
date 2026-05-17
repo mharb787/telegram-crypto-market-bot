@@ -172,6 +172,10 @@ async function runCycle({ forceReport = false, send = true, manual = false } = {
   const report = await analyzeMarket();
   await rememberRecommendations(report.results);
 
+  const strongBuys = report.results.filter((r) => !r.error && r.action === "شراء صريح").map((r) => r.symbol);
+  const timestamp = new Date().toLocaleString("en-GB", { timeZone: "Asia/Riyadh", hour12: false });
+  console.log(`[${timestamp}] تحليل ${config.analysisIntervalMinutes}د — ${strongBuys.length ? "شراء صريح: " + strongBuys.join(", ") : "لا إشارة"}`);
+
   if (send && (manual || forceReport)) {
     await sendRecommendationMessages(report);
     lastReportAt = Date.now();
