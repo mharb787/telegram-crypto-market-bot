@@ -84,6 +84,8 @@ export async function checkTradeReadiness({ recommendation, amountUsdt, config }
 export async function executeTrade({ recommendation, amountUsdt, ticker }) {
   const okx = new OkxClient();
   const trailAtr = process.env.TRAIL_ATR ? Number(process.env.TRAIL_ATR) : null;
+  const trailAfter = process.env.TRAIL_AFTER || "tp1";
+  const activationPrice = trailAfter === "tp2" && recommendation.target2 ? recommendation.target2 : recommendation.target1;
 
   let result;
   if (trailAtr && recommendation.atr) {
@@ -92,7 +94,7 @@ export async function executeTrade({ recommendation, amountUsdt, ticker }) {
       symbol: recommendation.symbol,
       quoteAmount: amountUsdt,
       stopLoss: recommendation.stop,
-      activationPrice: recommendation.target1,
+      activationPrice,
       callbackRatio
     });
   } else {
@@ -123,8 +125,9 @@ export async function executeTrade({ recommendation, amountUsdt, ticker }) {
 }
 
 export function formatTradeOpened(trade) {
+  const trailActivation = process.env.TRAIL_AFTER === "tp2" && trade.target2 ? trade.target2 : trade.target1;
   const exitMode = trade.trailMode
-    ? `تيك بروفيت: $${formatUsd(trade.target1)} (يتفعل trailing stop بعده)\nOKX trail algo: ${trade.okx.trailAlgoId ?? "غير متاح"}`
+    ? `تفعيل trailing عند: $${formatUsd(trailActivation)} (${process.env.TRAIL_AFTER === "tp2" ? "TP2" : "TP1"})\nOKX trail algo: ${trade.okx.trailAlgoId ?? "غير متاح"}`
     : `الهدف الأول: $${formatUsd(trade.target1)}`;
   return [
     `تم إرسال أمر الصفقة إلى OKX.`,
