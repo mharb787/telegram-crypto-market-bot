@@ -1,12 +1,15 @@
 import { atr, bollinger, ema, macd, percentChange, rsi, supportResistance } from "./indicators.js";
 import { getMarketSessionContext } from "./marketSessions.js";
+import { OkxClient } from "./okx.js";
 import { appendJsonLog, loadStrategy, readJson, writeJson } from "./storage.js";
 
-const STABLE_SYMBOLS = new Set([
-  "USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "USDD", "PYUSD", "USDS", "BUSD", "USD1", "GUSD", "LUSD", "FRAX"
-]);
-
-const EXCLUDED_LIKE_STABLE = new Set(["WBTC", "WETH", "STETH", "WEETH", "RETH", "CBETH"]);
+const DEFAULT_TARGET_SYMBOLS = ["XRP", "TRX", "TON"];
+const ASSET_NAMES = {
+  BTC: "Bitcoin",
+  XRP: "XRP",
+  TRX: "TRON",
+  TON: "Toncoin"
+};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -17,55 +20,28 @@ function fmt(value, digits = 2) {
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: digits });
 }
 
-async function getJson(url) {
-  const response = await fetch(url, { headers: { "user-agent": "telegram-crypto-market-bot/0.1" } });
-  if (!response.ok) throw new Error(`Request failed ${response.status}: ${url}`);
-  return response.json();
-}
-
-const EXCLUDED_FROM_RESULTS = new Set(["BTC", "ETH"]);
-
 export async function fetchTopCryptoAssets(limit = 5) {
-  const url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=30&page=1&sparkline=false&price_change_percentage=24h,7d";
-  const markets = await getJson(url);
-  return markets
-    .filter((asset) => {
-      const symbol = asset.symbol.toUpperCase();
-      return !STABLE_SYMBOLS.has(symbol) && !EXCLUDED_LIKE_STABLE.has(symbol) && !EXCLUDED_FROM_RESULTS.has(symbol);
-    })
+  return (process.env.TARGET_SYMBOLS || DEFAULT_TARGET_SYMBOLS.join(","))
+    .split(",")
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter(Boolean)
     .slice(0, limit)
-    .map((asset) => ({
-      id: asset.id,
-      name: asset.name,
-      symbol: asset.symbol.toUpperCase(),
-      price: asset.current_price,
-      marketCapRank: asset.market_cap_rank,
-      marketCap: asset.market_cap,
-      volume24h: asset.total_volume,
-      change24h: asset.price_change_percentage_24h_in_currency ?? asset.price_change_percentage_24h,
-      change7d: asset.price_change_percentage_7d_in_currency
+    .map((symbol) => ({
+      id: symbol.toLowerCase(),
+      name: ASSET_NAMES[symbol] ?? symbol,
+      symbol
     }));
 }
 
-async function fetchBinanceCandles(symbol, interval = "1h", limit = 220) {
-  const pair = `${symbol}USDT`;
-  const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${limit}`;
-  const rows = await getJson(url);
-  return rows.map((row) => ({
-    openTime: row[0],
-    open: Number(row[1]),
-    high: Number(row[2]),
-    low: Number(row[3]),
-    close: Number(row[4]),
-    volume: Number(row[5]),
-    closeTime: row[6]
-  }));
+async function fetchOkxCandles(symbol, interval = "1h", limit = 220) {
+  const bar = interval === "4h" ? "4H" : "1H";
+  const okx = new OkxClient();
+  return okx.getCandles(symbol, bar, limit);
 }
 
 async function buildAssetAnalysis(asset, strategy, bitcoinState) {
-  const candles1h = await fetchBinanceCandles(asset.symbol, "1h", 220);
-  const candles4h = await fetchBinanceCandles(asset.symbol, "4h", 220);
-  const candlesDaily = await fetchBinanceCandles(asset.symbol, "1d", 220);
+  const candles1h = await fetchOkxCandles(asset.symbol, "1h", 220);
+  const candles4h = await fetchOkxCandles(asset.symbol, "4h", 220);
   const closes = candles4h.map((candle) => candle.close);
   const volumes = candles4h.map((candle) => candle.volume);
   const current = closes.at(-1);
@@ -117,10 +93,7 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
 
   const totalWeight = Object.values(strategy.weights).reduce((sum, value) => sum + value, 0);
   const weighted = Object.entries(factors).reduce((sum, [key, value]) => sum + ((value + 1) / 2) * strategy.weights[key], 0);
-  const dailyEma50 = ema(candlesDaily.map((c) => c.close), 50);
-  const aboveDailyEma50 = dailyEma50 !== null ? current > dailyEma50 : true;
-  const rawConfidence = clamp(Math.round((weighted / totalWeight) * 100 * sessionMultiplier), 0, 100);
-  const confidence = aboveDailyEma50 ? rawConfidence : Math.min(rawConfidence, 42);
+  const confidence = clamp(Math.round((weighted / totalWeight) * 100 * sessionMultiplier), 0, 100);
   const risk = confidence >= 78 && !session.isHighVolatilityWindow ? "medium" : confidence >= 65 ? "medium" : "high";
   const profile = strategy.riskProfiles[risk] ?? strategy.riskProfiles.medium;
   const atrStop = current - currentAtr * profile.stopAtr;
@@ -129,10 +102,10 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
   const target2 = current + currentAtr * profile.targetAtr * 1.55;
 
   let action = "انتظار";
-  if (confidence >= 87) action = "شراء صريح";
-  else if (confidence >= 82) action = "شراء مشروط";
-  else if (confidence >= 68) action = "مراقبة للشراء";
-  else if (confidence <= 45) action = "تجنب";
+  if (confidence >= 82) action = "شراء صريح";
+  else if (confidence >= 78) action = "شراء مشروط";
+  else if (confidence >= 65) action = "مراقبة للشراء";
+  else if (confidence <= 42) action = "تجنب";
 
   const reasons = [
     current > ema50
@@ -184,7 +157,8 @@ function getBitcoinStateFromAnalysis(analysis) {
 export async function analyzeMarket() {
   const strategy = await loadStrategy();
   const assets = await fetchTopCryptoAssets(5);
-  const btcAnalysis = await buildAssetAnalysis({ symbol: "BTC", name: "Bitcoin" }, strategy, { score: 50 });
+  const btcAsset = { symbol: "BTC", name: "Bitcoin" };
+  const btcAnalysis = await buildAssetAnalysis(btcAsset, strategy, { score: 50 });
   const bitcoinState = getBitcoinStateFromAnalysis(btcAnalysis);
   const results = [];
   for (const asset of assets) {
@@ -243,9 +217,10 @@ export async function rememberRecommendations(results) {
   await writeJson("recommendations.json", [...open, ...newItems].slice(-200));
 }
 
-async function fetchCurrentBinancePrice(symbol) {
-  const ticker = await getJson(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
-  return Number(ticker.price);
+async function fetchCurrentOkxPrice(symbol) {
+  const okx = new OkxClient();
+  const ticker = await okx.getTicker(symbol);
+  return ticker.last;
 }
 
 export async function reviewOpenRecommendations() {
@@ -262,7 +237,7 @@ export async function reviewOpenRecommendations() {
     }
 
     try {
-      const price = await fetchCurrentBinancePrice(recommendation.symbol);
+      const price = await fetchCurrentOkxPrice(recommendation.symbol);
       const ageMs = now - new Date(recommendation.openedAt).getTime();
       let status = "open";
       if (price <= recommendation.stop) status = "lost";

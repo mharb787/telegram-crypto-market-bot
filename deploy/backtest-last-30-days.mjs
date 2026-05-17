@@ -1,12 +1,14 @@
 import { ema, rsi, macd, bollinger, atr, supportResistance, percentChange } from "../src/indicators.js";
 
-const SYMBOLS = ["BNB", "XRP", "SOL", "DOGE", "ADA"];
-const BTC_SYMBOL = "BTC";
+const DEFAULT_TARGET_SYMBOLS = ["XRP", "TRX", "TON"];
+const SYMBOLS = (process.env.TARGET_SYMBOLS || DEFAULT_TARGET_SYMBOLS.join(","))
+  .split(",")
+  .map((symbol) => symbol.trim().toUpperCase())
+  .filter(Boolean);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
-const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -80,13 +82,12 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   const atrStop = current - currentAtr * stopAtr;
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * targetAtr;
-  const target2 = current + currentAtr * targetAtr * 1.55;
   let action = "انتظار";
-  if (confidence >= 87) action = "شراء صريح";
-  else if (confidence >= 82) action = "شراء مشروط";
-  else if (confidence >= 68) action = "مراقبة للشراء";
-  else if (confidence <= 45) action = "تجنب";
-  return { symbol, action, confidence, entry: current, stop, target1, target2, timestamp: candles.at(-1).timestamp };
+  if (confidence >= 82) action = "شراء صريح";
+  else if (confidence >= 78) action = "شراء مشروط";
+  else if (confidence >= 65) action = "مراقبة للشراء";
+  else if (confidence <= 42) action = "تجنب";
+  return { symbol, action, confidence, entry: current, stop, target1, timestamp: candles.at(-1).timestamp };
 }
 
 function shouldEnter(signal) {
@@ -97,12 +98,11 @@ function shouldEnter(signal) {
 }
 
 function settle(signal, futureCandles) {
-  const target = TARGET === 2 ? signal.target2 : signal.target1;
   for (const candle of futureCandles) {
     const hitStop = candle.low <= signal.stop;
-    const hitTarget = candle.high >= target;
+    const hitTarget = candle.high >= signal.target1;
     if (hitStop && hitTarget) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp, ambiguous: true };
-    if (hitTarget) return { status: "win", exit: target, timestamp: candle.timestamp };
+    if (hitTarget) return { status: "win", exit: signal.target1, timestamp: candle.timestamp };
     if (hitStop) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
   }
   const last = futureCandles.at(-1);
@@ -117,9 +117,7 @@ function profitUsdt(entry, exit) {
 const until = Date.now() - OFFSET_DAYS * 24 * 60 * 60 * 1000;
 const since = until - LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
 const warmupSince = since - 220 * 4 * 60 * 60 * 1000;
-const dailyWarmupSince = since - 60 * 24 * 60 * 60 * 1000;
 const all = {};
-const allDaily = {};
 
 async function getBinanceCandles(symbol, startTime, endTime) {
   const url = new URL("https://api.binance.com/api/v3/klines");
@@ -141,60 +139,23 @@ async function getBinanceCandles(symbol, startTime, endTime) {
   }));
 }
 
-async function getBinanceDailyCandles(symbol, startTime, endTime) {
-  const url = new URL("https://api.binance.com/api/v3/klines");
-  url.searchParams.set("symbol", `${symbol}USDT`);
-  url.searchParams.set("interval", "1d");
-  url.searchParams.set("limit", "1000");
-  url.searchParams.set("startTime", String(startTime));
-  url.searchParams.set("endTime", String(endTime));
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Binance daily candles failed for ${symbol}: ${response.status}`);
-  const rows = await response.json();
-  return rows.map((row) => ({ timestamp: Number(row[0]), close: Number(row[4]) }));
-}
-
-function buildDailyEma200Series(dailyCandles) {
-  const period = 50;
-  if (dailyCandles.length < period) return [];
-  const multiplier = 2 / (period + 1);
-  let val = dailyCandles.slice(0, period).reduce((s, c) => s + c.close, 0) / period;
-  const result = [{ timestamp: dailyCandles[period - 1].timestamp, value: val }];
-  for (let i = period; i < dailyCandles.length; i++) {
-    val = dailyCandles[i].close * multiplier + val * (1 - multiplier);
-    result.push({ timestamp: dailyCandles[i].timestamp, value: val });
-  }
-  return result;
-}
-
-function getEma50At(series, timestamp) {
-  let result = null;
-  for (const entry of series) {
-    if (entry.timestamp <= timestamp) result = entry.value;
-    else break;
-  }
-  return result;
-}
-
-all[BTC_SYMBOL] = await getBinanceCandles(BTC_SYMBOL, warmupSince, until);
 for (const symbol of SYMBOLS) {
-  all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
-  allDaily[symbol] = await getBinanceDailyCandles(symbol, dailyWarmupSince, until);
+  try {
+    all[symbol] = await getBinanceCandles(symbol, warmupSince, until);
+  } catch (error) {
+    console.error(`Skipping ${symbol}: ${error.message}`);
+    all[symbol] = [];
+  }
 }
-
-const ema200Series = Object.fromEntries(
-  SYMBOLS.map((symbol) => [symbol, buildDailyEma200Series(allDaily[symbol])])
-);
 
 const trades = [];
 const startIndex = 210;
-const btcCandles = all[BTC_SYMBOL];
+const btcCandles = await getBinanceCandles("BTC", warmupSince, until);
 for (const symbol of SYMBOLS) {
   const candles = all[symbol];
+  if (candles.length <= startIndex) continue;
   for (let i = startIndex; i < candles.length - 1; i += 1) {
     if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
-    const dailyEma50 = getEma50At(ema200Series[symbol], candles[i].timestamp);
-    if (dailyEma50 !== null && candles[i].close < dailyEma50) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
@@ -247,7 +208,7 @@ console.log(JSON.stringify({
     "stop loss at strategy stop",
     "if TP and SL hit same candle, counted as loss",
     "fees/slippage not included",
-    "current top 5 symbols used",
+    "symbols from TARGET_SYMBOLS",
     "historical candles from Binance 4H endpoint"
   ]
 }, null, 2));

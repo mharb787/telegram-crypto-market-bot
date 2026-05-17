@@ -6,22 +6,29 @@ const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 
 const results = [];
 
-process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر...\n\n`);
+process.stdout.write(`\nجاري تشغيل ${MONTHS} أشهر... [TP${TARGET}]\n\n`);
 
 for (let i = MONTHS - 1; i >= 0; i--) {
-  const env = { ...process.env, BACKTEST_OFFSET_DAYS: String(i * 30), BACKTEST_TRADE_USDT: String(TRADE_USDT), BACKTEST_TARGET: String(TARGET) };
+  const env = {
+    ...process.env,
+    BACKTEST_OFFSET_DAYS: String(i * 30),
+    BACKTEST_TRADE_USDT: String(TRADE_USDT),
+    BACKTEST_TARGET: String(TARGET)
+  };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
-  const output = execSync("node deploy/backtest-last-30-days.mjs", { env }).toString();
-  results.push(JSON.parse(output));
+  try {
+    const output = execSync("node deploy/backtest-last-30-days.mjs", { env }).toString();
+    results.push(JSON.parse(output));
+  } catch (error) {
+    console.error(`\nخطأ في الشهر offset=${i * 30}:`, error.message);
+  }
 }
 
 process.stdout.write(" ".repeat(40) + "\r");
 
-const W = 82;
-const line = "─".repeat(W);
-
+const W = 84;
 console.log("\n" + "═".repeat(W));
-console.log("  BACKTEST SUMMARY — آخر " + MONTHS + " أشهر | حجم الصفقة: $" + TRADE_USDT);
+console.log(`  BACKTEST SUMMARY — آخر ${MONTHS} أشهر | $${TRADE_USDT}/صفقة | TP${TARGET}`);
 console.log("═".repeat(W));
 console.log(
   "  " +
@@ -33,7 +40,7 @@ console.log(
   "نجاح%".padStart(8) +
   "الربح".padStart(10)
 );
-console.log("  " + line);
+console.log("  " + "─".repeat(W));
 
 let totalProfit = 0;
 let totalTrades = 0;
@@ -46,11 +53,11 @@ for (const r of results) {
   const period = `${from} → ${until}`;
   const profitStr = (r.totalProfit >= 0 ? "+" : "") + "$" + r.totalProfit.toFixed(2);
   const winRateStr = r.closedTrades > 0 ? r.winRate + "%" : "—";
+  const flag = r.totalTrades === 0 ? " ⛔" : r.totalProfit >= 0 ? " ✅" : " ❌";
   totalProfit += r.totalProfit;
   totalTrades += r.totalTrades;
   totalWins += r.wins;
   totalLosses += r.losses;
-  const flag = r.totalTrades === 0 ? " ⛔" : r.totalProfit >= 0 ? " ✅" : " ❌";
   console.log(
     "  " +
     period.padEnd(24) +
@@ -64,7 +71,7 @@ for (const r of results) {
   );
 }
 
-console.log("  " + line);
+console.log("  " + "─".repeat(W));
 const overallWinRate = (totalWins + totalLosses) > 0
   ? ((totalWins / (totalWins + totalLosses)) * 100).toFixed(2) + "%"
   : "—";
@@ -81,7 +88,8 @@ console.log(
 );
 console.log("═".repeat(W) + "\n");
 
-console.log("  العملات:", results[0]?.symbols?.join(", ") ?? "—");
+const symbols = results[0]?.symbols ?? [];
+console.log("  العملات:", symbols.join(", ") || "—");
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
-console.log("  الهدف المستخدم: TP" + TARGET);
+console.log("  الهدف: TP" + TARGET);
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
