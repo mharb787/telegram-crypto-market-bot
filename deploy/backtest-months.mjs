@@ -93,9 +93,11 @@ console.log(
 );
 console.log("═".repeat(W) + "\n");
 
+const maxConcurrent = Math.max(...results.map((r) => r.maxConcurrentTrades ?? 0));
 const symbols = results[0]?.symbols ?? [];
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
 console.log("  الهدف: " + modeLabel);
+console.log(`  أقصى صفقات مفتوحة في نفس الوقت: ${maxConcurrent} صفقة (${maxConcurrent * TRADE_USDT}$)`);
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
 
 // Per-symbol breakdown

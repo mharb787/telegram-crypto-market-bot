@@ -201,12 +201,21 @@ for (const symbol of SYMBOLS) {
     const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR) : settle(signal, candles.slice(i + 1));
     trades.push({
       ...signal,
+      exitTimestamp: outcome.timestamp,
       status: outcome.status,
       exit: outcome.exit,
       profit: profitUsdt(signal.entry, outcome.exit),
       ambiguous: outcome.ambiguous ?? false
     });
   }
+}
+
+let maxConcurrent = 0;
+for (const trade of trades) {
+  const concurrent = trades.filter(
+    (other) => other.timestamp <= trade.timestamp && (other.exitTimestamp ?? Infinity) >= trade.timestamp
+  ).length;
+  if (concurrent > maxConcurrent) maxConcurrent = concurrent;
 }
 
 const closed = trades.filter((trade) => trade.status === "win" || trade.status === "loss");
@@ -239,6 +248,7 @@ console.log(JSON.stringify({
   open: trades.length - closed.length,
   winRate: closed.length ? Number(((wins.length / closed.length) * 100).toFixed(2)) : 0,
   totalProfit: Number(totalProfit.toFixed(2)),
+  maxConcurrentTrades: maxConcurrent,
   bySymbol,
   assumptions: [
     "4H candles",
