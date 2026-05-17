@@ -5,6 +5,7 @@ const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR || "";
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
+const TRAIL_RATIO = process.env.BACKTEST_TRAIL_RATIO || "";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 const BTC_FILTER = process.env.BACKTEST_BTC_FILTER || "";
 const DYNAMIC_FILTER = process.env.BACKTEST_DYNAMIC_FILTER === "true";
@@ -14,7 +15,11 @@ const MODE = process.env.BACKTEST_MODE || "strong-buy";
 
 const results = [];
 
-const modeLabel = TRAIL_ATR ? `TRAIL×${TRAIL_ATR}@${TRAIL_AFTER.toUpperCase()}` : `TP${TARGET}`;
+const modeLabel = TRAIL_RATIO
+  ? `RATIO×${TRAIL_RATIO}@${TRAIL_AFTER.toUpperCase()}`
+  : TRAIL_ATR
+    ? `TRAIL×${TRAIL_ATR}@${TRAIL_AFTER.toUpperCase()}`
+    : `TP${TARGET}`;
 const entryLabel = MODE !== "strong-buy" ? `دخول≥${MIN_CONFIDENCE || 65}` : "";
 const filterLabel = [
   entryLabel,
@@ -34,7 +39,8 @@ for (let i = MONTHS - 1; i >= 0; i--) {
     BACKTEST_DYNAMIC_FILTER: DYNAMIC_FILTER ? "true" : "false",
     BACKTEST_MODE: MODE,
     ...(BTC_FILTER ? { BACKTEST_BTC_FILTER: BTC_FILTER } : {}),
-    ...(MIN_CONFIDENCE ? { BACKTEST_MIN_CONFIDENCE: MIN_CONFIDENCE } : {})
+    ...(MIN_CONFIDENCE ? { BACKTEST_MIN_CONFIDENCE: MIN_CONFIDENCE } : {}),
+    ...(TRAIL_RATIO ? { BACKTEST_TRAIL_RATIO: TRAIL_RATIO } : {})
   };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
   try {

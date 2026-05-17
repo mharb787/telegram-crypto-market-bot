@@ -12,6 +12,7 @@ const MODE = process.env.BACKTEST_MODE || "strong-buy";
 const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
+const TRAIL_RATIO = process.env.BACKTEST_TRAIL_RATIO ? Number(process.env.BACKTEST_TRAIL_RATIO) : null;
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 const BTC_MIN_SCORE = process.env.BACKTEST_BTC_FILTER ? Number(process.env.BACKTEST_BTC_FILTER) : 0;
 const DYNAMIC_FILTER = process.env.BACKTEST_DYNAMIC_FILTER === "true";
@@ -187,6 +188,42 @@ function settleTrailing(signal, futureCandles, trailAtr, trailAfter = "tp1") {
   return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
 }
 
+function settleTrailingRatio(signal, futureCandles, trailRatio, trailAfter = "tp2") {
+  const activationPrice = trailAfter === "tp3" ? signal.target3 : trailAfter === "tp2" ? signal.target2 : signal.target1;
+  let activated = false;
+  let peak = signal.entry;
+  let trailingStop = signal.stop;
+
+  for (const candle of futureCandles) {
+    if (!activated) {
+      if (candle.low <= signal.stop) {
+        return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
+      }
+      if (candle.high >= activationPrice) {
+        activated = true;
+        peak = activationPrice;
+        trailingStop = activationPrice;
+      }
+    }
+
+    if (activated) {
+      if (candle.high > peak) {
+        peak = candle.high;
+        const newTrail = peak - (peak - signal.entry) * trailRatio;
+        if (newTrail > trailingStop) trailingStop = newTrail;
+      }
+      if (candle.low <= trailingStop) {
+        return { status: "win", exit: trailingStop, timestamp: candle.timestamp };
+      }
+    }
+  }
+
+  const last = futureCandles.at(-1);
+  const exit = last?.close ?? signal.entry;
+  if (activated) return { status: "win", exit, timestamp: last?.timestamp };
+  return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
+}
+
 function profitUsdt(entry, exit) {
   return TRADE_USDT * ((exit - entry) / entry);
 }
@@ -243,7 +280,11 @@ for (const symbol of SYMBOLS) {
     const recentTrades = trades.slice(-20);
     const threshold = getDynamicThreshold(btcCandles, candles[i].timestamp, recentTrades);
     if (signal.confidence < threshold) continue;
-    const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR, TRAIL_AFTER) : settle(signal, candles.slice(i + 1));
+    const outcome = TRAIL_RATIO
+      ? settleTrailingRatio(signal, candles.slice(i + 1), TRAIL_RATIO, TRAIL_AFTER)
+      : TRAIL_ATR
+        ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR, TRAIL_AFTER)
+        : settle(signal, candles.slice(i + 1));
     if (NO_REPEAT && outcome.timestamp) lastExitBySymbol[symbol] = outcome.timestamp;
     trades.push({
       ...signal,
