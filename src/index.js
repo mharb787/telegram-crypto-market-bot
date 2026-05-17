@@ -280,7 +280,8 @@ async function handleCommand(text, message) {
   if (command === "/status") {
     const strategy = await loadStrategy();
     const okx = new OkxClient();
-    await bot.sendMessage([
+
+    const lines = [
       "حالة الاستراتيجية والتداول:",
       `أقل ثقة للتنبيه: ${strategy.minConfidenceToAlert}`,
       `الفحص التلقائي الصامت: كل ${config.analysisIntervalMinutes} دقيقة`,
@@ -289,9 +290,37 @@ async function handleCommand(text, message) {
       `OKX API: ${okx.hasCredentials() ? "مربوط" : "غير مربوط"}`,
       `حد مبلغ الصفقة: ${config.minTradeUsdt} - ${config.maxTradeUsdt} USDT`,
       `أقصى تغير سعر قبل التأكيد: ${config.maxPriceDriftPercent}%`,
-      `الأوزان: ${Object.entries(strategy.weights).map(([key, value]) => `${key}=${value}`).join(", ")}`,
       `آخر ضبط ذاتي: ${strategy.lastTunedAt ?? "لم يحدث بعد"}`
-    ].join("\n"));
+    ];
+
+    if (okx.hasCredentials()) {
+      try {
+        const { orders, algos } = await okx.getOpenTrades();
+        const executedTrades = await readJson("executed-trades.json", []);
+        const openTracked = executedTrades.filter((t) => !t.closedAt);
+
+        lines.push("");
+        lines.push(`الصفقات المفتوحة (${openTracked.length} مسجلة):`);
+
+        if (openTracked.length === 0) {
+          lines.push("  لا توجد صفقات مفتوحة");
+        } else {
+          for (const t of openTracked.slice(-10)) {
+            const age = Math.round((Date.now() - new Date(t.createdAt).getTime()) / 3600000);
+            lines.push(`  • ${t.symbol} | $${fmt(t.referencePrice)} | منذ ${age}س | $${t.amountUsdt}`);
+          }
+          if (openTracked.length > 10) lines.push(`  ... و${openTracked.length - 10} أخرى`);
+        }
+
+        if (orders.length + algos.length > 0) {
+          lines.push(`أوامر OKX المفتوحة: ${orders.length} عادية + ${algos.length} trailing`);
+        }
+      } catch {
+        lines.push("تعذر جلب الصفقات من OKX");
+      }
+    }
+
+    await bot.sendMessage(lines.join("\n"));
     return;
   }
 

@@ -142,6 +142,14 @@ export class OkxClient {
     return data ?? [];
   }
 
+  async getOpenTrades() {
+    const [orders, algos] = await Promise.all([
+      this.request("GET", `/api/v5/trade/orders-pending?instType=SPOT`, null, { auth: true }).catch(() => []),
+      this.request("GET", `/api/v5/trade/orders-algo-pending?instType=SPOT&ordType=move_order_stop`, null, { auth: true }).catch(() => [])
+    ]);
+    return { orders: orders ?? [], algos: algos ?? [] };
+  }
+
   async getAlgoOrderStatus(algoId, instId) {
     const data = await this.request("GET", `/api/v5/trade/orders-algo-history?algoId=${algoId}&instId=${instId}&ordType=move_order_stop`, null, { auth: true });
     return data?.[0] ?? null;
