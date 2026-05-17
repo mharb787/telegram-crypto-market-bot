@@ -9,11 +9,15 @@ const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 const BTC_FILTER = process.env.BACKTEST_BTC_FILTER || "";
 const DYNAMIC_FILTER = process.env.BACKTEST_DYNAMIC_FILTER === "true";
 const BASE_OFFSET = Number(process.env.BACKTEST_BASE_OFFSET_DAYS || 0);
+const MIN_CONFIDENCE = process.env.BACKTEST_MIN_CONFIDENCE || "";
+const MODE = process.env.BACKTEST_MODE || "strong-buy";
 
 const results = [];
 
 const modeLabel = TRAIL_ATR ? `TRAIL×${TRAIL_ATR}@${TRAIL_AFTER.toUpperCase()}` : `TP${TARGET}`;
+const entryLabel = MODE !== "strong-buy" ? `دخول≥${MIN_CONFIDENCE || 65}` : "";
 const filterLabel = [
+  entryLabel,
   BTC_FILTER ? `BTC≥${BTC_FILTER}` : "",
   DYNAMIC_FILTER ? "ديناميكي" : ""
 ].filter(Boolean).map((s) => ` | ${s}`).join("");
@@ -28,7 +32,9 @@ for (let i = MONTHS - 1; i >= 0; i--) {
     BACKTEST_NO_REPEAT: NO_REPEAT ? "true" : "false",
     BACKTEST_TRAIL_AFTER: TRAIL_AFTER,
     BACKTEST_DYNAMIC_FILTER: DYNAMIC_FILTER ? "true" : "false",
-    ...(BTC_FILTER ? { BACKTEST_BTC_FILTER: BTC_FILTER } : {})
+    BACKTEST_MODE: MODE,
+    ...(BTC_FILTER ? { BACKTEST_BTC_FILTER: BTC_FILTER } : {}),
+    ...(MIN_CONFIDENCE ? { BACKTEST_MIN_CONFIDENCE: MIN_CONFIDENCE } : {})
   };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
   try {
