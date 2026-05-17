@@ -9,6 +9,7 @@ const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
+const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
@@ -125,12 +126,19 @@ function shouldEnter(signal) {
   return ["شراء صريح", "شراء مشروط", "مراقبة للشراء"].includes(signal.action);
 }
 
+function targetPrice(signal) {
+  if (TARGET === 3) return signal.target3;
+  if (TARGET === 2) return signal.target2;
+  return signal.target1;
+}
+
 function settle(signal, futureCandles) {
+  const target = targetPrice(signal);
   for (const candle of futureCandles) {
     const hitStop = candle.low <= signal.stop;
-    const hitTarget = candle.high >= signal.target1;
+    const hitTarget = candle.high >= target;
     if (hitStop && hitTarget) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp, ambiguous: true };
-    if (hitTarget) return { status: "win", exit: signal.target1, timestamp: candle.timestamp };
+    if (hitTarget) return { status: "win", exit: target, timestamp: candle.timestamp };
     if (hitStop) return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
   }
   const last = futureCandles.at(-1);
@@ -274,6 +282,7 @@ const bySymbol = Object.fromEntries(SYMBOLS.map((symbol) => {
 
 console.log(JSON.stringify({
   mode: MODE,
+  target: TARGET,
   trailAtr: TRAIL_ATR,
   days: LOOKBACK_DAYS,
   offsetDays: OFFSET_DAYS,
@@ -294,7 +303,7 @@ console.log(JSON.stringify({
   assumptions: [
     "4H candles",
     "entry at signal candle close",
-    "take profit at target1",
+    `take profit at target${TARGET}`,
     "stop loss at strategy stop",
     "if TP and SL hit same candle, counted as loss",
     "fees/slippage not included",
