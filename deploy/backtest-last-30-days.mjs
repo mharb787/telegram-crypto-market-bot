@@ -10,6 +10,7 @@ const LOOKBACK_DAYS = Number(process.env.BACKTEST_DAYS || 30);
 const OFFSET_DAYS = Number(process.env.BACKTEST_OFFSET_DAYS || 0);
 const MODE = process.env.BACKTEST_MODE || "strong-buy";
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_TRAIL_ATR) : null;
+const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -189,16 +190,19 @@ for (const symbol of SYMBOLS) {
 const trades = [];
 const startIndex = 210;
 const btcCandles = await getBinanceCandles("BTC", warmupSince, until);
+const lastExitBySymbol = {};
 for (const symbol of SYMBOLS) {
   const candles = all[symbol];
   if (candles.length <= startIndex) continue;
   for (let i = startIndex; i < candles.length - 1; i += 1) {
     if (candles[i].timestamp < since || candles[i].timestamp > until) continue;
+    if (NO_REPEAT && lastExitBySymbol[symbol] && candles[i].timestamp < lastExitBySymbol[symbol]) continue;
     const btcIndex = btcCandles.findIndex((candle) => candle.timestamp === candles[i].timestamp);
     const btcSignal = btcIndex >= startIndex ? actionFromCandles("BTC", btcCandles.slice(0, btcIndex + 1), 50) : null;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
     if (!shouldEnter(signal)) continue;
     const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR) : settle(signal, candles.slice(i + 1));
+    if (NO_REPEAT && outcome.timestamp) lastExitBySymbol[symbol] = outcome.timestamp;
     trades.push({
       ...signal,
       exitTimestamp: outcome.timestamp,

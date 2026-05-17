@@ -4,6 +4,7 @@ const MONTHS = Number(process.env.BACKTEST_MONTHS || 8);
 const TRADE_USDT = Number(process.env.BACKTEST_TRADE_USDT || 50);
 const TARGET = Number(process.env.BACKTEST_TARGET || 1);
 const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR || "";
+const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 
 const results = [];
 
@@ -15,7 +16,8 @@ for (let i = MONTHS - 1; i >= 0; i--) {
     ...process.env,
     BACKTEST_OFFSET_DAYS: String(i * 30),
     BACKTEST_TRADE_USDT: String(TRADE_USDT),
-    BACKTEST_TARGET: String(TARGET)
+    BACKTEST_TARGET: String(TARGET),
+    BACKTEST_NO_REPEAT: NO_REPEAT ? "true" : "false"
   };
   process.stdout.write(`  الشهر ${MONTHS - i}/${MONTHS} (offset=${i * 30})...\r`);
   try {
@@ -98,6 +100,7 @@ const symbols = results[0]?.symbols ?? [];
 console.log("  وضع الإشارة:", results[0]?.mode ?? "—");
 console.log("  الهدف: " + modeLabel);
 console.log(`  أقصى صفقات مفتوحة في نفس الوقت: ${maxConcurrent} صفقة (${maxConcurrent * TRADE_USDT}$)`);
+if (NO_REPEAT) console.log("  وضع: منع التكرار — صفقة واحدة لكل عملة حتى الإغلاق");
 console.log("  ملاحظة: بدون رسوم أو انزلاق سعري\n");
 
 // Per-symbol breakdown
