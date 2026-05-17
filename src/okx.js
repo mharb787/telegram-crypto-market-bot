@@ -131,4 +131,77 @@ export class OkxClient {
       raw: data?.[0]
     };
   }
+
+  async getOrderDetails(ordId, instId) {
+    const data = await this.request("GET", `/api/v5/trade/order?instId=${instId}&ordId=${ordId}`, null, { auth: true });
+    return data?.[0] ?? null;
+  }
+
+  async placeTrailingStopAlgo({ instId, sz, activePx, callbackRatio }) {
+    const body = {
+      instId,
+      tdMode: "cash",
+      side: "sell",
+      ordType: "move_order_stop",
+      sz: normalizeNumber(sz, 8),
+      activePx: normalizeNumber(activePx),
+      callbackRatio: normalizeNumber(Math.min(callbackRatio, 0.1), 6)
+    };
+    return this.request("POST", "/api/v5/trade/order-algo", body, { auth: true });
+  }
+
+  async placeSpotMarketBuyWithTrailingTP({ symbol, quoteAmount, stopLoss, activationPrice, callbackRatio }) {
+    const instId = `${symbol.toUpperCase()}-USDT`;
+    const clientId = `t${Date.now()}${symbol}`.replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);
+
+    // Market buy with SL only — TP handled by trailing stop algo
+    const body = {
+      instId,
+      tdMode: "cash",
+      clOrdId: clientId,
+      side: "buy",
+      ordType: "market",
+      sz: normalizeNumber(quoteAmount, 2),
+      tgtCcy: "quote_ccy",
+      attachAlgoOrds: [
+        {
+          attachAlgoClOrdId: `${clientId}sl`.slice(0, 32),
+          slTriggerPx: normalizeNumber(stopLoss),
+          slOrdPx: "-1"
+        }
+      ]
+    };
+
+    const buyData = await this.request("POST", "/api/v5/trade/order", body, { auth: true });
+    const orderId = buyData?.[0]?.ordId;
+
+    // Poll for fill size — market orders fill within seconds
+    let fillSz = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const order = await this.getOrderDetails(orderId, instId);
+      if (order?.state === "filled" && Number(order.fillSz) > 0) {
+        fillSz = Number(order.fillSz);
+        break;
+      }
+    }
+
+    let trailAlgoId = null;
+    if (fillSz && fillSz > 0) {
+      const trailData = await this.placeTrailingStopAlgo({ instId, sz: fillSz, activePx: activationPrice, callbackRatio });
+      trailAlgoId = trailData?.[0]?.algoId;
+    }
+
+    return {
+      instId,
+      clientId,
+      orderId,
+      trailAlgoId,
+      fillSz,
+      mode: "trailing",
+      statusCode: buyData?.[0]?.sCode,
+      statusMessage: buyData?.[0]?.sMsg,
+      raw: buyData?.[0]
+    };
+  }
 }

@@ -83,12 +83,26 @@ export async function checkTradeReadiness({ recommendation, amountUsdt, config }
 
 export async function executeTrade({ recommendation, amountUsdt, ticker }) {
   const okx = new OkxClient();
-  const result = await okx.placeSpotMarketBuyWithTpSl({
-    symbol: recommendation.symbol,
-    quoteAmount: amountUsdt,
-    takeProfit: recommendation.target1,
-    stopLoss: recommendation.stop
-  });
+  const trailAtr = process.env.TRAIL_ATR ? Number(process.env.TRAIL_ATR) : null;
+
+  let result;
+  if (trailAtr && recommendation.atr) {
+    const callbackRatio = (recommendation.atr * trailAtr) / recommendation.entry;
+    result = await okx.placeSpotMarketBuyWithTrailingTP({
+      symbol: recommendation.symbol,
+      quoteAmount: amountUsdt,
+      stopLoss: recommendation.stop,
+      activationPrice: recommendation.target1,
+      callbackRatio
+    });
+  } else {
+    result = await okx.placeSpotMarketBuyWithTpSl({
+      symbol: recommendation.symbol,
+      quoteAmount: amountUsdt,
+      takeProfit: recommendation.target1,
+      stopLoss: recommendation.stop
+    });
+  }
 
   const trade = {
     id: `trade-${Date.now()}-${recommendation.symbol}`,
@@ -100,6 +114,7 @@ export async function executeTrade({ recommendation, amountUsdt, ticker }) {
     stop: recommendation.stop,
     target1: recommendation.target1,
     target2: recommendation.target2,
+    trailMode: result.mode === "trailing",
     okx: result,
     createdAt: nowIso()
   };
@@ -108,13 +123,16 @@ export async function executeTrade({ recommendation, amountUsdt, ticker }) {
 }
 
 export function formatTradeOpened(trade) {
+  const exitMode = trade.trailMode
+    ? `تيك بروفيت: $${formatUsd(trade.target1)} (يتفعل trailing stop بعده)\nOKX trail algo: ${trade.okx.trailAlgoId ?? "غير متاح"}`
+    : `الهدف الأول: $${formatUsd(trade.target1)}`;
   return [
     `تم إرسال أمر الصفقة إلى OKX.`,
     `العملة: ${trade.symbol}`,
     `المبلغ: ${formatUsd(trade.amountUsdt, 2)} USDT`,
     `سعر مرجعي وقت التنفيذ: $${formatUsd(trade.executionReferencePrice)}`,
     `وقف الخسارة: $${formatUsd(trade.stop)}`,
-    `الهدف الأول: $${formatUsd(trade.target1)}`,
+    exitMode,
     `OKX order id: ${trade.okx.orderId ?? "غير متاح"}`
   ].join("\n");
 }

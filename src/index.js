@@ -71,6 +71,7 @@ function toTradeRecommendation(item) {
     confidence: item.confidence,
     risk: item.risk,
     entry: item.current,
+    atr: item.indicators?.atr,
     stop: item.stop,
     target1: item.target1,
     target2: item.target2,
