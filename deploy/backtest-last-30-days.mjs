@@ -112,21 +112,39 @@ function settle(signal, futureCandles) {
 }
 
 function settleTrailing(signal, futureCandles, trailAtr) {
+  let tp1Reached = false;
   let peak = signal.entry;
   let trailingStop = signal.stop;
+
   for (const candle of futureCandles) {
-    if (candle.high > peak) {
-      peak = candle.high;
-      const newTrail = peak - signal.atr * trailAtr;
-      if (newTrail > trailingStop) trailingStop = newTrail;
+    if (!tp1Reached) {
+      if (candle.low <= signal.stop) {
+        return { status: "loss", exit: signal.stop, timestamp: candle.timestamp };
+      }
+      if (candle.high >= signal.target1) {
+        tp1Reached = true;
+        peak = signal.target1;
+        trailingStop = signal.target1; // trailing يبدأ من TP1
+      }
     }
-    if (candle.low <= trailingStop) {
-      const status = trailingStop > signal.entry ? "win" : "loss";
-      return { status, exit: trailingStop, timestamp: candle.timestamp };
+
+    if (tp1Reached) {
+      if (candle.high > peak) {
+        peak = candle.high;
+        const newTrail = peak - signal.atr * trailAtr;
+        if (newTrail > trailingStop) trailingStop = newTrail;
+      }
+      if (candle.low <= trailingStop) {
+        return { status: "win", exit: trailingStop, timestamp: candle.timestamp };
+      }
     }
   }
+
   const last = futureCandles.at(-1);
   const exit = last?.close ?? signal.entry;
+  if (tp1Reached) {
+    return { status: "win", exit, timestamp: last?.timestamp };
+  }
   return { status: exit > signal.entry ? "open_profit" : "open_loss", exit, timestamp: last?.timestamp };
 }
 
