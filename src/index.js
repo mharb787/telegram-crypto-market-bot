@@ -77,6 +77,7 @@ function toTradeRecommendation(item) {
     stop: item.stop,
     target1: item.target1,
     target2: item.target2,
+    target3: item.target3,
     support: item.support,
     resistance: item.resistance,
     reasons: item.reasons,

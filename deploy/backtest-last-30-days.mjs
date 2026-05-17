@@ -87,12 +87,13 @@ function actionFromCandles(symbol, candles, bitcoinScore = 50) {
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * targetAtr;
   const target2 = current + currentAtr * targetAtr * 1.55;
+  const target3 = current + currentAtr * targetAtr * 2.2;
   let action = "انتظار";
   if (confidence >= 82) action = "شراء صريح";
   else if (confidence >= 78) action = "شراء مشروط";
   else if (confidence >= 65) action = "مراقبة للشراء";
   else if (confidence <= 42) action = "تجنب";
-  return { symbol, action, confidence, entry: current, stop, target1, target2, atr: currentAtr, timestamp: candles.at(-1).timestamp };
+  return { symbol, action, confidence, entry: current, stop, target1, target2, target3, atr: currentAtr, timestamp: candles.at(-1).timestamp };
 }
 
 function shouldEnter(signal) {
@@ -116,7 +117,7 @@ function settle(signal, futureCandles) {
 }
 
 function settleTrailing(signal, futureCandles, trailAtr, trailAfter = "tp1") {
-  const activationPrice = trailAfter === "tp2" ? signal.target2 : signal.target1;
+  const activationPrice = trailAfter === "tp3" ? signal.target3 : trailAfter === "tp2" ? signal.target2 : signal.target1;
   let activated = false;
   let peak = signal.entry;
   let trailingStop = signal.stop;

@@ -100,6 +100,7 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
   const stop = activeSupport ? Math.min(activeSupport * 0.995, atrStop) : atrStop;
   const target1 = current + currentAtr * profile.targetAtr;
   const target2 = current + currentAtr * profile.targetAtr * 1.55;
+  const target3 = current + currentAtr * profile.targetAtr * 2.2;
 
   let action = "انتظار";
   if (confidence >= 82) action = "شراء صريح";
@@ -136,6 +137,7 @@ async function buildAssetAnalysis(asset, strategy, bitcoinState) {
     stop,
     target1,
     target2,
+    target3,
     support: activeSupport,
     resistance: activeResistance,
     indicators: { ema20, ema50, ema200, rsi: currentRsi, macd: currentMacd, bollinger: bands, atr: currentAtr, volumeRatio },
