@@ -13,6 +13,28 @@ const TRAIL_ATR = process.env.BACKTEST_TRAIL_ATR ? Number(process.env.BACKTEST_T
 const TRAIL_AFTER = process.env.BACKTEST_TRAIL_AFTER || "tp1";
 const NO_REPEAT = process.env.BACKTEST_NO_REPEAT === "true";
 const BTC_MIN_SCORE = process.env.BACKTEST_BTC_FILTER ? Number(process.env.BACKTEST_BTC_FILTER) : 0;
+const DYNAMIC_FILTER = process.env.BACKTEST_DYNAMIC_FILTER === "true";
+
+function getMonthlyBtcColor(btcCandles, timestamp) {
+  const date = new Date(timestamp);
+  const prevMonthStart = new Date(date.getFullYear(), date.getMonth() - 1, 1).getTime();
+  const prevMonthEnd = new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+  const monthCandles = btcCandles.filter((c) => c.timestamp >= prevMonthStart && c.timestamp < prevMonthEnd);
+  if (monthCandles.length < 5) return null;
+  return monthCandles.at(-1).close >= monthCandles[0].open ? "green" : "red";
+}
+
+function getDynamicThreshold(btcCandles, timestamp, recentTrades) {
+  if (!DYNAMIC_FILTER) return 82;
+  const closed = recentTrades.filter((t) => t.status === "win" || t.status === "loss");
+  if (closed.length >= 5) {
+    const winRate = closed.filter((t) => t.status === "win").length / closed.length;
+    if (winRate < 0.4) return 90;
+  }
+  const btcColor = getMonthlyBtcColor(btcCandles, timestamp);
+  if (btcColor === "red") return 88;
+  return 82;
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -208,6 +230,9 @@ for (const symbol of SYMBOLS) {
     if (BTC_MIN_SCORE > 0 && (btcSignal?.confidence ?? 0) < BTC_MIN_SCORE) continue;
     const signal = actionFromCandles(symbol, candles.slice(0, i + 1), btcSignal?.confidence ?? 50);
     if (!shouldEnter(signal)) continue;
+    const recentTrades = trades.slice(-20);
+    const threshold = getDynamicThreshold(btcCandles, candles[i].timestamp, recentTrades);
+    if (signal.confidence < threshold) continue;
     const outcome = TRAIL_ATR ? settleTrailing(signal, candles.slice(i + 1), TRAIL_ATR, TRAIL_AFTER) : settle(signal, candles.slice(i + 1));
     if (NO_REPEAT && outcome.timestamp) lastExitBySymbol[symbol] = outcome.timestamp;
     trades.push({
