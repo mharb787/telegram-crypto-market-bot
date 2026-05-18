@@ -20,7 +20,7 @@ export async function checkOnChain(address) {
     getAccount(address),
     isBlacklistedByTether(address),
     getFirstTransaction(address),
-    getTRC20Transfers(address, 40),
+    getTRC20Transfers(address, 20),
   ]);
 
   const acc       = account.status    === 'fulfilled' ? account.value    : null;
@@ -37,12 +37,16 @@ export async function checkOnChain(address) {
   const createMs = acc?.create_time ?? (first ? first.block_timestamp : null);
   const ageInfo  = buildAgeInfo(createMs);
 
-  // ── Suspicious counterparties ─────────────────────────────────────────────
+  // ── Suspicious counterparties (limit to 5 to stay fast) ─────────────────
   const counterparties = uniqueCounterparties(address, txList);
   let bannedCounterparties = [];
   if (counterparties.length > 0) {
     try {
-      bannedCounterparties = await filterBlacklisted(counterparties.slice(0, 15));
+      bannedCounterparties = await withTimeout(
+        filterBlacklisted(counterparties.slice(0, 5)),
+        6000,
+        []
+      );
     } catch (err) {
       logger.warn('filterBlacklisted failed:', err.message);
     }
@@ -63,6 +67,11 @@ export async function checkOnChain(address) {
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+function withTimeout(promise, ms, fallback) {
+  const timer = new Promise(resolve => setTimeout(() => resolve(fallback), ms));
+  return Promise.race([promise, timer]);
+}
 
 function buildAgeInfo(timestampMs) {
   if (!timestampMs) return null;

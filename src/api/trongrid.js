@@ -17,6 +17,7 @@ async function post(path, body) {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`TronGrid ${path} → HTTP ${res.status}`);
   return res.json();
@@ -25,7 +26,7 @@ async function post(path, body) {
 async function get(path) {
   const headers = {};
   if (process.env.TRON_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_API_KEY;
-  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  const res = await fetch(`${BASE_URL}${path}`, { headers, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`TronGrid ${path} → HTTP ${res.status}`);
   return res.json();
 }
