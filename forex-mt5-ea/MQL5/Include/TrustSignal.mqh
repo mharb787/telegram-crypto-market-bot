@@ -1,21 +1,27 @@
 //+------------------------------------------------------------------+
 //|                                               TrustSignal.mqh    |
-//|          6-Factor Trust Score System -- ForexTrust EA            |
-//|  Weights: Trend 24% | Momentum 19% | Volume 15% |               |
-//|           Context 18% | DXY 16% | Risk/Reward 8%                |
+//|          6-Factor Trust Score — exact port of crypto strategy    |
+//|                                                                  |
+//|  Each factor maps to [-1, +1], normalized to [0,1], then        |
+//|  weighted exactly as in the original JS bot:                    |
+//|    Trend 24% | Momentum 19% | Volume 15%                        |
+//|    Context 18% | DXY 16% | Risk/Reward 8%                       |
+//|  Session multipliers applied after base score.                  |
 //+------------------------------------------------------------------+
 #ifndef TRUST_SIGNAL_MQH
 #define TRUST_SIGNAL_MQH
 
 struct STrustBreakdown
 {
-   double trendScore;
-   double momentumScore;
-   double volumeScore;
-   double contextScore;
-   double dxyScore;
-   double rrScore;
-   double totalScore;
+   double trendFactor;      // [-1, 1]
+   double momentumFactor;
+   double volumeFactor;
+   double contextFactor;
+   double dxyFactor;
+   double rrFactor;
+   double baseScore;        // before session multiplier [0, 100]
+   double totalScore;       // after session multiplier  [0, 100]
+   double sessionMult;
    double atr;
    double support;
    double resistance;
@@ -24,271 +30,187 @@ struct STrustBreakdown
 class CTrustSignal
 {
 private:
-   string   m_symbol;
+   string          m_symbol;
    ENUM_TIMEFRAMES m_tf;
 
-   // Indicator handles
-   int      m_hATR;
-   int      m_hEMA20;
-   int      m_hEMA50;
-   int      m_hEMA200;
-   int      m_hRSI;
-   int      m_hMACD;
-   int      m_hBands;
+   int    m_hATR;
+   int    m_hEMA20;
+   int    m_hEMA50;
+   int    m_hEMA200;
+   int    m_hRSI;
+   int    m_hMACD;
+   int    m_hBands;
 
-   // DXY handle (optional)
-   int      m_hDXY_EMA20;
-   int      m_hDXY_EMA50;
-   string   m_dxySymbol;
-   bool     m_dxyAvailable;
-   bool     m_invertDXY;
+   int    m_hDXY_EMA20;
+   int    m_hDXY_EMA50;
+   int    m_hDXY_RSI;
+   string m_dxySymbol;
+   bool   m_dxyAvailable;
+   bool   m_invertDXY;
+   int    m_volPeriod;
 
-   int      m_atrPeriod;
-   int      m_volPeriod;
-
-   double Price(int shift = 0)
+   double Buf(int handle, int bufIdx, int shift)
    {
-      return iClose(m_symbol, m_tf, shift);
+      double b[];
+      ArraySetAsSeries(b, true);
+      if(CopyBuffer(handle, bufIdx, shift, 1, b) < 1) return 0;
+      return b[0];
    }
 
-   double GetBuffer(int handle, int bufferIdx, int shift)
+   double Clamp(double v, double lo, double hi) { return MathMin(hi, MathMax(lo, v)); }
+   double Norm(double factor) { return (Clamp(factor, -1, 1) + 1.0) / 2.0 * 100.0; }
+
+   // 1. TREND (24%) — exact JS replica
+   double TrendFactor()
    {
-      double buf[];
-      ArraySetAsSeries(buf, true);
-      if(CopyBuffer(handle, bufferIdx, shift, 1, buf) < 1) return 0;
-      return buf[0];
+      double price  = iClose(m_symbol, m_tf, 0);
+      double ema20  = Buf(m_hEMA20,  0, 0);
+      double ema50  = Buf(m_hEMA50,  0, 0);
+      double ema200 = Buf(m_hEMA200, 0, 0);
+      if(ema20 == 0 || ema50 == 0 || ema200 == 0) return 0;
+
+      double raw = (price > ema20  ? 0.35 : -0.20) +
+                   (price > ema50  ? 0.35 : -0.25) +
+                   (price > ema200 ? 0.30 : -0.35) +
+                   (ema20  > ema50 ? 0.20 : -0.15);
+      return Clamp(raw, -1, 1);
    }
 
-   // -------------------------------------------------------
-   // 1. TREND SCORE (EMA20, EMA50, EMA200) -- weight 24%
-   // -------------------------------------------------------
-   double CalcTrend()
+   // 2. MOMENTUM (19%) — RSI + MACD histogram + 24h change + BB middle
+   double MomentumFactor()
    {
-      double price  = Price(0);
-      double ema20  = GetBuffer(m_hEMA20,  0, 0);
-      double ema50  = GetBuffer(m_hEMA50,  0, 0);
-      double ema200 = GetBuffer(m_hEMA200, 0, 0);
+      double rsiVal  = Buf(m_hRSI,   0, 0);
+      double macdH   = Buf(m_hMACD,  2, 0);
+      double bbMid   = Buf(m_hBands, 0, 0);
+      double price   = iClose(m_symbol, m_tf, 0);
+      double prev24h = iClose(m_symbol, m_tf, 6);
 
-      if(ema20 == 0 || ema50 == 0 || ema200 == 0) return 50;
+      double rsiPart  = (rsiVal > 50 && rsiVal < 70) ? 0.35 :
+                        (rsiVal >= 70)                ? -0.10 : -0.20;
+      double macdPart = (macdH > 0)                  ? 0.30  : -0.20;
+      double chgPart  = (prev24h > 0 && price > prev24h) ? 0.25 : -0.15;
+      double bbPart   = (bbMid  > 0 && price > bbMid)    ? 0.15 : -0.10;
 
-      bool aboveAll = (price > ema20) && (ema20 > ema50) && (ema50 > ema200);
-      bool above2   = (price > ema20) && (ema20 > ema50);
-      bool above1   = (price > ema20);
-      bool below1   = (price < ema20) && (price > ema50);
-      bool bearAll  = (price < ema20) && (ema20 < ema50) && (ema50 < ema200);
-
-      double ema20Prev = GetBuffer(m_hEMA20, 0, 3);
-      double ema50Prev = GetBuffer(m_hEMA50, 0, 3);
-      double slopeBonus = 0;
-      if(ema20 > ema20Prev && ema50 > ema50Prev) slopeBonus = 10;
-      else if(ema20 > ema20Prev) slopeBonus = 5;
-
-      double score;
-      if(aboveAll)    score = 90 + slopeBonus;
-      else if(above2) score = 70 + slopeBonus;
-      else if(above1) score = 50;
-      else if(below1) score = 30;
-      else if(bearAll) score = 5;
-      else             score = 20;
-
-      return MathMin(100, score);
+      return Clamp(rsiPart + macdPart + chgPart + bbPart, -1, 1);
    }
 
-   // -------------------------------------------------------
-   // 2. MOMENTUM SCORE (RSI, MACD, BB, Price Change) -- weight 19%
-   // -------------------------------------------------------
-   double CalcMomentum()
-   {
-      double score = 0;
-
-      // RSI (0-40 pts)
-      double rsi = GetBuffer(m_hRSI, 0, 0);
-      if(rsi >= 55 && rsi < 70)       score += 40;
-      else if(rsi >= 50 && rsi < 55)  score += 30;
-      else if(rsi >= 45 && rsi < 50)  score += 15;
-      else if(rsi >= 70 && rsi < 78)  score += 20;
-      else if(rsi >= 30 && rsi < 45)  score += 10;
-
-      // MACD (0-35 pts)
-      double macdMain     = GetBuffer(m_hMACD, 0, 0);
-      double macdSignal   = GetBuffer(m_hMACD, 1, 0);
-      double macdHist     = GetBuffer(m_hMACD, 2, 0);
-      double macdHistPrev = GetBuffer(m_hMACD, 2, 1);
-
-      bool macdAboveSignal = (macdMain > macdSignal);
-      bool macdPositive    = (macdMain > 0);
-      bool histGrowing     = (macdHist > macdHistPrev);
-
-      if(macdAboveSignal && macdPositive && histGrowing) score += 35;
-      else if(macdAboveSignal && macdPositive)           score += 25;
-      else if(macdAboveSignal)                           score += 15;
-      else if(macdPositive)                              score += 10;
-
-      // Bollinger Bands (0-25 pts)
-      double bbUpper  = GetBuffer(m_hBands, 1, 0);
-      double bbLower  = GetBuffer(m_hBands, 2, 0);
-      double price    = Price(0);
-      double bbRange  = bbUpper - bbLower;
-
-      if(bbRange > 0)
-      {
-         double relPos = (price - bbLower) / bbRange;
-         if(relPos >= 0.6 && relPos < 0.9)   score += 25;
-         else if(relPos >= 0.5 && relPos < 0.6) score += 18;
-         else if(relPos >= 0.4 && relPos < 0.5) score += 10;
-         else if(relPos >= 0.9)               score += 15;
-      }
-
-      return MathMin(100, score);
-   }
-
-   // -------------------------------------------------------
-   // 3. VOLUME SCORE -- weight 15%
-   // -------------------------------------------------------
-   double CalcVolume()
+   // 3. VOLUME (15%) — volumeRatio vs 30-bar average
+   double VolumeFactor()
    {
       long volBuf[];
       ArraySetAsSeries(volBuf, true);
-      if(CopyTickVolume(m_symbol, m_tf, 0, m_volPeriod + 1, volBuf) < m_volPeriod + 1)
-         return 50;
+      int need = m_volPeriod + 1;
+      if(CopyTickVolume(m_symbol, m_tf, 0, need, volBuf) < need) return 0.35;
 
-      long currentVol = volBuf[0];
-      double avgVol   = 0;
+      long   cur    = volBuf[0];
+      double avgVol = 0;
       for(int i = 1; i <= m_volPeriod; i++) avgVol += (double)volBuf[i];
       avgVol /= m_volPeriod;
 
-      if(avgVol <= 0) return 50;
-      double ratio = currentVol / avgVol;
-
-      if(ratio >= 2.0)      return 100;
-      else if(ratio >= 1.5) return 80;
-      else if(ratio >= 1.2) return 65;
-      else if(ratio >= 1.0) return 55;
-      else if(ratio >= 0.7) return 40;
-      else                  return 20;
+      if(avgVol <= 0) return 0.35;
+      double ratio = cur / avgVol;
+      return (ratio > 1.15) ? 0.80 : (ratio > 0.85) ? 0.35 : -0.30;
    }
 
-   // -------------------------------------------------------
-   // 4. MARKET CONTEXT SCORE (Session, Volatility) -- weight 18%
-   // -------------------------------------------------------
-   double CalcMarketContext()
+   // 4. MARKET CONTEXT (18%)
+   // isHighVolatilityWindow (open/close transitions) = RISKY = lower score 0.25
+   // Normal hours = stable = higher score 0.55
+   // Weekend / Friday 20:00+ UTC = hard block (-1)
+   double ContextFactor()
    {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
       int hour = dt.hour;
       int dow  = dt.day_of_week;
 
-      // Friday close avoidance (after 20:00 UTC)
-      if(dow == 5 && hour >= 20) return 0;
-      if(dow == 0) return 0;
+      if(dow == 0) return -1.0;
+      if(dow == 5 && hour >= 20) return -1.0;
 
-      double sessionScore;
-      if(hour >= 12 && hour < 16)      sessionScore = 100; // London/NY overlap
-      else if(hour >= 7  && hour < 12) sessionScore = 80;  // London
-      else if(hour >= 16 && hour < 21) sessionScore = 75;  // NY
-      else if(hour >= 0  && hour < 7)  sessionScore = 35;  // Asian
-      else                             sessionScore = 20;
+      bool highVolWindow =
+         (hour == 0) ||
+         (hour == 6) ||
+         (hour == 7 || (hour == 8 && dt.min < 30)) ||
+         ((hour == 15 && dt.min >= 30) || (hour == 16 && dt.min < 30)) ||
+         ((hour == 13 && dt.min >= 30) || hour == 14) ||
+         (hour == 20);
 
-      double atrCurrent = GetBuffer(m_hATR, 0, 0);
-      double atrBuf[];
-      ArraySetAsSeries(atrBuf, true);
-      double atrAvg = 0;
-      if(CopyBuffer(m_hATR, 0, 0, 20, atrBuf) == 20)
-      {
-         for(int i = 0; i < 20; i++) atrAvg += atrBuf[i];
-         atrAvg /= 20;
-      }
-
-      double volBonus = 0;
-      if(atrAvg > 0)
-      {
-         double atrRatio = atrCurrent / atrAvg;
-         if(atrRatio >= 1.3)     volBonus = 10;
-         else if(atrRatio >= 1.0) volBonus = 5;
-         else if(atrRatio < 0.6)  volBonus = -15;
-      }
-
-      return MathMax(0, MathMin(100, sessionScore + volBonus));
+      return highVolWindow ? 0.25 : 0.55;
    }
 
-   // -------------------------------------------------------
-   // 5. DXY SCORE (Dollar Index Filter) -- weight 16%
-   // -------------------------------------------------------
-   double CalcDXY()
+   // Session multipliers — exact values from default-strategy.json
+   double SessionMultiplier()
    {
-      if(!m_dxyAvailable) return 50;
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      int hour = dt.hour;
+      int mn   = dt.min;
 
-      double dxyEMA20 = GetBuffer(m_hDXY_EMA20, 0, 0);
-      double dxyEMA50 = GetBuffer(m_hDXY_EMA50, 0, 0);
+      if((hour == 13 && mn >= 30) || hour == 14)    return 0.90; // us_open
+      if(hour == 20)                                 return 0.94; // us_close
+      if(hour == 0)                                  return 0.94; // asia_open
+      if(hour == 7 || (hour == 8 && mn < 30))       return 0.95; // europe_open
+      if(hour == 6)                                  return 0.96; // asia_close
+      if((hour == 15 && mn >= 30) || (hour == 16 && mn < 30)) return 0.96; // europe_close
+      return 1.0;
+   }
+
+   // 5. DXY FILTER (16%) — mirrors BTC filter scale: 0.65 / 0.25 / -0.25
+   double DXYFactor()
+   {
+      if(!m_dxyAvailable) return 0.25;
+
+      double dxyEMA20 = Buf(m_hDXY_EMA20, 0, 0);
+      double dxyEMA50 = Buf(m_hDXY_EMA50, 0, 0);
+      double dxyRSI   = Buf(m_hDXY_RSI,   0, 0);
       double dxyPrice = iClose(m_dxySymbol, m_tf, 0);
 
-      if(dxyEMA20 == 0 || dxyEMA50 == 0) return 50;
+      if(dxyEMA20 == 0 || dxyEMA50 == 0) return 0.25;
 
-      bool dxyBearish = (dxyPrice < dxyEMA20) && (dxyEMA20 < dxyEMA50);
-      bool dxyNeutral = (MathAbs(dxyPrice - dxyEMA20) / dxyEMA20 < 0.003);
-      bool dxyBullish = (dxyPrice > dxyEMA20) && (dxyEMA20 > dxyEMA50);
+      // Build a mini DXY confidence (0-100)
+      double dxyScore = 50;
+      if(dxyPrice > dxyEMA50 && dxyEMA20 > dxyEMA50) dxyScore += 20;
+      else if(dxyPrice < dxyEMA50)                    dxyScore -= 20;
+      if(dxyRSI > 55 && dxyRSI < 70)                dxyScore += 10;
+      else if(dxyRSI <= 45)                          dxyScore -= 10;
+      dxyScore = Clamp(dxyScore, 0, 100);
 
-      double rawScore;
-      if(dxyBearish)       rawScore = 85;
-      else if(dxyNeutral)  rawScore = 50;
-      else if(dxyBullish)  rawScore = 20;
-      else                 rawScore = 40;
+      if(m_invertDXY) dxyScore = 100 - dxyScore; // bearish DXY = good for XAU/EUR/GBP
 
-      // For XAUUSD/EUR/GBP: DXY bearish = GOOD (same direction as pair)
-      // For USD/XXX: invert
-      return m_invertDXY ? rawScore : 100 - rawScore;
+      if(dxyScore >= 65) return 0.65;
+      if(dxyScore >= 50) return 0.25;
+      return -0.25;
    }
 
-   // -------------------------------------------------------
-   // 6. RISK/REWARD SCORE (Support vs Resistance) -- weight 8%
-   // -------------------------------------------------------
-   double CalcRiskReward(double &supportOut, double &resistanceOut)
+   // 6. RISK/REWARD (8%)
+   // Support = 12th percentile of lows (60 bars)
+   // Resistance = 12th percentile of highs (60 bars, from top)
+   // distToResistance > distToSupport * 0.8 ? 0.55 : 0.05
+   double RRFactor(double &supportOut, double &resistanceOut)
    {
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows,  true);
 
-      int lookback = 50;
-      if(CopyHigh(m_symbol, m_tf, 0, lookback, highs) < lookback) { supportOut = 0; resistanceOut = 0; return 50; }
-      if(CopyLow (m_symbol, m_tf, 0, lookback, lows)  < lookback) { supportOut = 0; resistanceOut = 0; return 50; }
+      int lookback = 60;
+      if(CopyHigh(m_symbol, m_tf, 0, lookback, highs) < lookback ||
+         CopyLow (m_symbol, m_tf, 0, lookback, lows)  < lookback)
+      { supportOut = 0; resistanceOut = 0; return 0.25; }
 
-      double price = Price(0);
-      double atr   = GetBuffer(m_hATR, 0, 0);
-      if(atr == 0) { supportOut = 0; resistanceOut = 0; return 50; }
+      double sortedLows[], sortedHighs[];
+      ArrayCopy(sortedLows,  lows,  0, 0, lookback);
+      ArrayCopy(sortedHighs, highs, 0, 0, lookback);
+      ArraySort(sortedLows);   // ascending
+      ArraySort(sortedHighs);  // ascending
 
-      double support    = 0, resistance = 0;
-      double minDistS   = atr * 10, minDistR = atr * 10;
+      int pctIdx        = (int)MathFloor(lookback * 0.12);
+      supportOut        = sortedLows[pctIdx];
+      resistanceOut     = sortedHighs[lookback - 1 - pctIdx];
 
-      for(int i = 2; i < lookback - 2; i++)
-      {
-         if(lows[i] < lows[i-1] && lows[i] < lows[i+1] &&
-            lows[i] < lows[i-2] && lows[i] < lows[i+2])
-         {
-            double dist = price - lows[i];
-            if(dist > 0 && dist < minDistS) { minDistS = dist; support = lows[i]; }
-         }
-         if(highs[i] > highs[i-1] && highs[i] > highs[i+1] &&
-            highs[i] > highs[i-2] && highs[i] > highs[i+2])
-         {
-            double dist = highs[i] - price;
-            if(dist > 0 && dist < minDistR) { minDistR = dist; resistance = highs[i]; }
-         }
-      }
+      double current          = iClose(m_symbol, m_tf, 0);
+      double distToSupport    = (current - supportOut)    / current * 100;
+      double distToResistance = (resistanceOut - current) / current * 100;
 
-      supportOut    = (support > 0)    ? support    : price - atr * 2;
-      resistanceOut = (resistance > 0) ? resistance : price + atr * 3;
-
-      double distToSupport    = price - supportOut;
-      double distToResistance = resistanceOut - price;
-
-      if(distToResistance <= 0) return 20;
-      double rr = distToResistance / MathMax(distToSupport, atr * 0.5);
-
-      if(rr >= 3.0)      return 100;
-      else if(rr >= 2.0) return 80;
-      else if(rr >= 1.5) return 65;
-      else if(rr >= 1.0) return 45;
-      else               return 20;
+      return (distToResistance > distToSupport * 0.8) ? 0.55 : 0.05;
    }
 
 public:
@@ -297,8 +219,8 @@ public:
       m_hEMA50(INVALID_HANDLE), m_hEMA200(INVALID_HANDLE),
       m_hRSI(INVALID_HANDLE), m_hMACD(INVALID_HANDLE),
       m_hBands(INVALID_HANDLE), m_hDXY_EMA20(INVALID_HANDLE),
-      m_hDXY_EMA50(INVALID_HANDLE), m_dxyAvailable(false),
-      m_atrPeriod(14), m_volPeriod(20), m_invertDXY(true) {}
+      m_hDXY_EMA50(INVALID_HANDLE), m_hDXY_RSI(INVALID_HANDLE),
+      m_dxyAvailable(false), m_invertDXY(true), m_volPeriod(30) {}
 
    bool Init(string symbol, ENUM_TIMEFRAMES tf,
              int atrPeriod, int ema20, int ema50, int ema200,
@@ -307,7 +229,6 @@ public:
    {
       m_symbol    = symbol;
       m_tf        = tf;
-      m_atrPeriod = atrPeriod;
       m_volPeriod = volPeriod;
       m_dxySymbol = dxySymbol;
       m_invertDXY = invertDXY;
@@ -325,73 +246,76 @@ public:
          m_hRSI == INVALID_HANDLE || m_hMACD == INVALID_HANDLE ||
          m_hBands == INVALID_HANDLE)
       {
-         Print("TrustSignal: Failed to create indicator handles for ", symbol);
+         Print("TrustSignal: indicator init failed for ", symbol);
          return false;
       }
 
       m_dxyAvailable = false;
       if(StringLen(dxySymbol) > 0 && SymbolSelect(dxySymbol, true))
       {
-         m_hDXY_EMA20 = iMA(dxySymbol, tf, ema20, 0, MODE_EMA, PRICE_CLOSE);
-         m_hDXY_EMA50 = iMA(dxySymbol, tf, ema50, 0, MODE_EMA, PRICE_CLOSE);
+         m_hDXY_EMA20 = iMA (dxySymbol, tf, ema20,     0, MODE_EMA, PRICE_CLOSE);
+         m_hDXY_EMA50 = iMA (dxySymbol, tf, ema50,     0, MODE_EMA, PRICE_CLOSE);
+         m_hDXY_RSI   = iRSI(dxySymbol, tf, rsiPeriod, PRICE_CLOSE);
          if(m_hDXY_EMA20 != INVALID_HANDLE && m_hDXY_EMA50 != INVALID_HANDLE)
          {
             m_dxyAvailable = true;
-            Print("TrustSignal: DXY filter enabled using ", dxySymbol);
+            Print("TrustSignal: DXY filter active — ", dxySymbol);
          }
       }
       else if(StringLen(dxySymbol) > 0)
-         Print("TrustSignal: DXY symbol '", dxySymbol, "' not available -- DXY filter disabled (neutral 50)");
+         Print("TrustSignal: '", dxySymbol, "' not found — DXY filter neutral (0.25)");
 
       return true;
    }
 
    void Release()
    {
-      if(m_hATR    != INVALID_HANDLE) IndicatorRelease(m_hATR);
-      if(m_hEMA20  != INVALID_HANDLE) IndicatorRelease(m_hEMA20);
-      if(m_hEMA50  != INVALID_HANDLE) IndicatorRelease(m_hEMA50);
-      if(m_hEMA200 != INVALID_HANDLE) IndicatorRelease(m_hEMA200);
-      if(m_hRSI    != INVALID_HANDLE) IndicatorRelease(m_hRSI);
-      if(m_hMACD   != INVALID_HANDLE) IndicatorRelease(m_hMACD);
-      if(m_hBands  != INVALID_HANDLE) IndicatorRelease(m_hBands);
-      if(m_hDXY_EMA20 != INVALID_HANDLE) IndicatorRelease(m_hDXY_EMA20);
-      if(m_hDXY_EMA50 != INVALID_HANDLE) IndicatorRelease(m_hDXY_EMA50);
+      int handles[] = {m_hATR, m_hEMA20, m_hEMA50, m_hEMA200,
+                       m_hRSI, m_hMACD, m_hBands,
+                       m_hDXY_EMA20, m_hDXY_EMA50, m_hDXY_RSI};
+      for(int i = 0; i < ArraySize(handles); i++)
+         if(handles[i] != INVALID_HANDLE) IndicatorRelease(handles[i]);
    }
 
-   double GetATR(int shift = 0) { return GetBuffer(m_hATR, 0, shift); }
+   double GetATR(int shift = 0) { return Buf(m_hATR, 0, shift); }
 
    STrustBreakdown Calculate()
    {
       STrustBreakdown bd;
+      bd.atr = GetATR(0);
 
-      bd.trendScore    = CalcTrend();
-      bd.momentumScore = CalcMomentum();
-      bd.volumeScore   = CalcVolume();
-      bd.contextScore  = CalcMarketContext();
-      bd.dxyScore      = CalcDXY();
-      bd.rrScore       = CalcRiskReward(bd.support, bd.resistance);
-      bd.atr           = GetATR(0);
+      bd.trendFactor    = TrendFactor();
+      bd.momentumFactor = MomentumFactor();
+      bd.volumeFactor   = VolumeFactor();
+      bd.contextFactor  = ContextFactor();
+      bd.dxyFactor      = DXYFactor();
+      bd.rrFactor       = RRFactor(bd.support, bd.resistance);
 
-      bd.totalScore = bd.trendScore    * 0.24 +
-                      bd.momentumScore * 0.19 +
-                      bd.volumeScore   * 0.15 +
-                      bd.contextScore  * 0.18 +
-                      bd.dxyScore      * 0.16 +
-                      bd.rrScore       * 0.08;
+      // Exact weight formula from default-strategy.json:
+      // confidence = sum((factor+1)/2 * weight) / totalWeight * 100 * sessionMult
+      double weighted =
+         Norm(bd.trendFactor)    / 100.0 * 24 +
+         Norm(bd.momentumFactor) / 100.0 * 19 +
+         Norm(bd.volumeFactor)   / 100.0 * 15 +
+         Norm(bd.contextFactor)  / 100.0 * 18 +
+         Norm(bd.dxyFactor)      / 100.0 * 16 +
+         Norm(bd.rrFactor)       / 100.0 * 8;
 
+      bd.baseScore   = Clamp(MathRound(weighted), 0, 100);
+      bd.sessionMult = SessionMultiplier();
+      bd.totalScore  = Clamp(MathRound(bd.baseScore * bd.sessionMult), 0, 100);
       return bd;
    }
 
    string FormatBreakdown(const STrustBreakdown &bd)
    {
       return StringFormat(
-         "Trust=%.1f | Trend=%.0f(24%%) Momentum=%.0f(19%%) "
-         "Volume=%.0f(15%%) Context=%.0f(18%%) DXY=%.0f(16%%) RR=%.0f(8%%)",
-         bd.totalScore,
-         bd.trendScore, bd.momentumScore, bd.volumeScore,
-         bd.contextScore, bd.dxyScore, bd.rrScore
-      );
+         "Trust=%.0f (base=%.0f x%.2f) | "
+         "Trend=%.2f(24%%) Mom=%.2f(19%%) Vol=%.2f(15%%) "
+         "Ctx=%.2f(18%%) DXY=%.2f(16%%) RR=%.2f(8%%)",
+         bd.totalScore, bd.baseScore, bd.sessionMult,
+         bd.trendFactor, bd.momentumFactor, bd.volumeFactor,
+         bd.contextFactor, bd.dxyFactor, bd.rrFactor);
    }
 };
 
