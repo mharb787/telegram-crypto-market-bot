@@ -39,43 +39,27 @@ export async function handleMessage(bot, msg) {
     return;
   }
 
-  // ── Step 2: send "loading" message, then fetch on-chain data ─────────────
+  // ── Step 2: send loading message ─────────────────────────────────────────
   logger.info(`On-chain check started — chat:${chatId} addr:${text}`);
+  await bot.sendMessage(chatId, loadingMessage(text), { parse_mode: 'Markdown' });
 
-  const loadingMsg = await bot.sendMessage(
-    chatId,
-    loadingMessage(text),
-    { parse_mode: 'Markdown' }
-  );
-
+  // ── Step 3: fetch on-chain data and send result as a new message ──────────
   try {
     const onchain = await checkOnChain(text);
-    const report  = onChainReport(text, fmt, onchain);
+    logger.info(`On-chain check done — risk:${onchain.risk} addr:${text}`);
 
-    // Edit the loading message in-place with the full report
-    await bot.editMessageText(report, {
-      chat_id:    chatId,
-      message_id: loadingMsg.message_id,
-      parse_mode: 'Markdown',
-      ...mainKeyboard,
-    });
+    const report = onChainReport(text, fmt, onchain);
+    await bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...mainKeyboard });
 
-    logger.info(`Report sent — risk:${onchain.risk} addr:${text}`);
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
-
-    await bot.editMessageText(
-      `📋 *نتيجة الفحص الأولي*\n\n` +
+    await bot.sendMessage(
+      chatId,
+      `✅ *صيغة العنوان صحيحة*\n\n` +
       `\`${text}\`\n\n` +
-      `✅ *صيغة العنوان:* صحيحة\n` +
-      `⚠️ *تعذّر الاتصال بالشبكة* — لم يمكن جلب البيانات الآنية.\n` +
-      `_حاول مرة أخرى بعد قليل._`,
-      {
-        chat_id:    chatId,
-        message_id: loadingMsg.message_id,
-        parse_mode: 'Markdown',
-        ...mainKeyboard,
-      }
+      `⚠️ *تعذّر الاتصال بشبكة TRON*\n_${err.message}_\n\n` +
+      `حاول إرسال العنوان مرة أخرى بعد قليل.`,
+      { parse_mode: 'Markdown', ...mainKeyboard }
     );
   }
 }
