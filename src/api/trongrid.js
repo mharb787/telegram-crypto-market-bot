@@ -1,94 +1,147 @@
 import { base58Decode } from '../validator/checksum.js';
+import { logger } from '../utils/logger.js';
 
 const BASE_URL      = process.env.TRON_API_URL ?? 'https://api.trongrid.io';
+const TRONSCAN_URL  = 'https://apilist.tronscanapi.com';
 const USDT_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+const USDT_EVM      = '0xa614f803b6fd780986a42c78ec9c7f77e6ded13c';
 
-// Convert Base58 TRC20 address → 32-byte hex parameter for contract calls
-function addressToParam(address) {
+// isBlacklisted(address) → keccak256 selector = 0xfe575a87
+const IS_BLACKLISTED_SELECTOR = 'fe575a87';
+
+// Convert Base58Check TRC20 address → 20-byte hex (no prefix/checksum)
+function addressToEvmHex(address) {
   const buf = base58Decode(address);
   if (!buf || buf.length !== 25) return null;
-  return buf.subarray(1, 21).toString('hex').padStart(64, '0');
+  return buf.subarray(1, 21).toString('hex');
 }
 
-async function post(path, body) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (process.env.TRON_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_API_KEY;
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`TronGrid ${path} → HTTP ${res.status}`);
+function headers(extra = {}) {
+  const h = { 'Content-Type': 'application/json', ...extra };
+  if (process.env.TRON_API_KEY) h['TRON-PRO-API-KEY'] = process.env.TRON_API_KEY;
+  return h;
+}
+
+async function fetchJSON(url, init = {}) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000), ...init });
+  if (!res.ok) throw new Error(`HTTP ${res.status} → ${url}`);
   return res.json();
 }
 
-async function get(path) {
-  const headers = {};
-  if (process.env.TRON_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_API_KEY;
-  const res = await fetch(`${BASE_URL}${path}`, { headers, signal: AbortSignal.timeout(8000) });
-  if (!res.ok) throw new Error(`TronGrid ${path} → HTTP ${res.status}`);
-  return res.json();
-}
+// ── Account ───────────────────────────────────────────────────────────────────
 
-// ── Account ──────────────────────────────────────────────────────────────────
-
-/** Returns raw account object or null if address has no on-chain activity. */
 export async function getAccount(address) {
-  const data = await get(`/v1/accounts/${address}`);
+  const data = await fetchJSON(`${BASE_URL}/v1/accounts/${address}`, {
+    headers: headers(),
+  });
   return data.data?.[0] ?? null;
 }
 
-// ── Transactions ─────────────────────────────────────────────────────────────
+// ── Transactions ──────────────────────────────────────────────────────────────
 
-/** Returns the oldest transaction (used for wallet-age calculation). */
 export async function getFirstTransaction(address) {
-  const data = await get(
-    `/v1/accounts/${address}/transactions?limit=1&order_by=block_timestamp,asc&only_confirmed=true`
+  const data = await fetchJSON(
+    `${BASE_URL}/v1/accounts/${address}/transactions?limit=1&order_by=block_timestamp,asc&only_confirmed=true`,
+    { headers: headers() }
   );
   return data.data?.[0] ?? null;
 }
 
-/** Returns up to `limit` recent TRC20 transfers. */
-export async function getTRC20Transfers(address, limit = 40) {
-  const data = await get(
-    `/v1/accounts/${address}/transactions/trc20?limit=${limit}&only_confirmed=true`
+export async function getTRC20Transfers(address, limit = 20) {
+  const data = await fetchJSON(
+    `${BASE_URL}/v1/accounts/${address}/transactions/trc20?limit=${limit}&only_confirmed=true`,
+    { headers: headers() }
   );
   return data.data ?? [];
 }
 
-// ── Tether Blacklist ──────────────────────────────────────────────────────────
+// ── Tether Blacklist via JSON-RPC eth_call (no API key needed) ────────────────
 
 /**
- * Calls isBlacklisted(address) on the USDT TRC20 contract.
- * Returns true if the address is on Tether's on-chain blacklist.
+ * Calls isBlacklisted(address) via JSON-RPC eth_call.
+ * Returns true | false | null (null = could not determine).
  */
-export async function isBlacklistedByTether(address) {
-  const param = addressToParam(address);
-  if (!param) return false;
+async function checkBlacklistRPC(address) {
+  const evmHex = addressToEvmHex(address);
+  if (!evmHex) return null;
 
-  const data = await post('/wallet/triggerconstantcontract', {
-    owner_address:     'T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb',
-    contract_address:  USDT_CONTRACT,
-    function_selector: 'isBlacklisted(address)',
-    parameter:         param,
-    visible:           true,
+  const callData = '0x' + IS_BLACKLISTED_SELECTOR + evmHex.padStart(64, '0');
+
+  const data = await fetchJSON(`${BASE_URL}/jsonrpc`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method:  'eth_call',
+      params:  [{ to: USDT_EVM, data: callData }, 'latest'],
+      id:      1,
+    }),
   });
 
-  const hex = data.constant_result?.[0];
-  return hex ? BigInt(`0x${hex}`) !== 0n : false;
+  logger.debug(`RPC isBlacklisted response: ${JSON.stringify(data)}`);
+
+  if (data.error) {
+    logger.warn(`RPC isBlacklisted error: ${JSON.stringify(data.error)}`);
+    return null;
+  }
+
+  const result = data.result;
+  if (!result || result === '0x') return null;
+
+  try {
+    return BigInt(result) !== 0n;
+  } catch {
+    logger.warn(`Could not parse RPC result: ${result}`);
+    return null;
+  }
 }
 
 /**
- * Checks a list of addresses against the Tether blacklist in parallel.
- * Returns the subset that are blacklisted.
+ * Fallback: check blacklist via TronScan account API.
+ * TronScan returns `accountType` and other flags.
+ */
+async function checkBlacklistTronScan(address) {
+  try {
+    const data = await fetchJSON(
+      `${TRONSCAN_URL}/api/account?address=${address}&includeToken=false`
+    );
+    logger.debug(`TronScan account: ${JSON.stringify(data).slice(0, 200)}`);
+    // TronScan marks frozen/blacklisted accounts
+    if (typeof data.isBlacklisted === 'boolean') return data.isBlacklisted;
+    if (data.accountType === 1 && data.frozen) return true;
+    return false;
+  } catch (err) {
+    logger.warn(`TronScan fallback failed: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Main export: tries RPC first, falls back to TronScan.
+ * Returns true | false | null.
+ */
+export async function isBlacklistedByTether(address) {
+  // Primary: JSON-RPC eth_call (no auth needed)
+  try {
+    const rpc = await checkBlacklistRPC(address);
+    if (rpc !== null) return rpc;
+  } catch (err) {
+    logger.warn(`RPC blacklist check failed: ${err.message}`);
+  }
+
+  // Fallback: TronScan API
+  return checkBlacklistTronScan(address);
+}
+
+/**
+ * Checks multiple addresses in parallel, returns those confirmed blacklisted.
  */
 export async function filterBlacklisted(addresses) {
   const results = await Promise.allSettled(
     addresses.map(async (addr) => ({ addr, bad: await isBlacklistedByTether(addr) }))
   );
   return results
-    .filter(r => r.status === 'fulfilled' && r.value.bad)
+    .filter(r => r.status === 'fulfilled' && r.value.bad === true)
     .map(r => r.value.addr);
 }
 
