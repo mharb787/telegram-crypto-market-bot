@@ -1,19 +1,20 @@
 {
   "name": "telegram-crypto-market-bot",
   "version": "0.1.0",
-  "description": "Telegram bot that analyzes top crypto assets, global market sessions, and self-tunes recommendation weights.",
+  "description": "Telegram bot that reviews TRC20 addresses and assesses their risk level.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "once": "node src/index.js --once",
-    "check": "node --check src/index.js && node --check src/analyzer.js && node --check src/indicators.js && node --check src/marketSessions.js && node --check src/storage.js && node --check src/telegram.js && node --check src/okx.js && node --check src/trading.js && node --check src/chart.js"
+    "check": "node --check src/index.js && node --check src/bot.js && node --check src/handlers/commandHandler.js && node --check src/handlers/messageHandler.js && node --check src/validator/trc20.js && node --check src/validator/checksum.js && node --check src/utils/logger.js && node --check src/utils/formatter.js"
   },
   "engines": {
     "node": ">=20"
   },
   "license": "MIT",
   "dependencies": {
+    "dotenv": "^17.4.2",
+    "node-telegram-bot-api": "^0.67.0",
     "pngjs": "^7.0.0"
   }
 }
