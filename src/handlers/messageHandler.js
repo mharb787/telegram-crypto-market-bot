@@ -1,22 +1,23 @@
-import { validateTRC20 } from '../validator/trc20.js';
-import { resultMessage } from '../utils/formatter.js';
+import { validateTRC20 }   from '../validator/trc20.js';
+import { checkOnChain }    from '../validator/onchain.js';
+import {
+  loadingMessage,
+  onChainReport,
+  invalidAddressMessage,
+  fmt,
+} from '../utils/formatter.js';
 import { mainKeyboard } from './commandHandler.js';
-import { logger } from '../utils/logger.js';
+import { logger }       from '../utils/logger.js';
 
 const PROMPT_TEXT = '🔍 فحص عنوان TRC20';
 
-/**
- * Handles any non-command message.
- * - If text matches the keyboard button, ask user to paste an address.
- * - Otherwise treat the text as a TRC20 address and validate it.
- */
 export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
   const text   = (msg.text ?? '').trim();
 
   if (!text) return;
 
-  // User tapped the persistent keyboard button
+  // User tapped the keyboard button → prompt for address
   if (text === PROMPT_TEXT) {
     await bot.sendMessage(
       chatId,
@@ -26,13 +27,55 @@ export async function handleMessage(bot, msg) {
     return;
   }
 
-  // Looks like an address — validate it
-  logger.info(`Validating address from chat ${chatId}: ${text}`);
-  const result = validateTRC20(text);
-  const reply  = resultMessage(text, result);
+  // ── Step 1: format validation (instant) ──────────────────────────────────
+  const formatResult = validateTRC20(text);
 
-  await bot.sendMessage(chatId, reply, {
-    parse_mode: 'Markdown',
-    ...mainKeyboard,
-  });
+  if (!formatResult.valid) {
+    await bot.sendMessage(
+      chatId,
+      invalidAddressMessage(text, formatResult.reason),
+      { parse_mode: 'Markdown', ...mainKeyboard }
+    );
+    return;
+  }
+
+  // ── Step 2: send "loading" message, then fetch on-chain data ─────────────
+  logger.info(`On-chain check started — chat:${chatId} addr:${text}`);
+
+  const loadingMsg = await bot.sendMessage(
+    chatId,
+    loadingMessage(text),
+    { parse_mode: 'Markdown' }
+  );
+
+  try {
+    const onchain = await checkOnChain(text);
+    const report  = onChainReport(text, fmt, onchain);
+
+    // Edit the loading message in-place with the full report
+    await bot.editMessageText(report, {
+      chat_id:    chatId,
+      message_id: loadingMsg.message_id,
+      parse_mode: 'Markdown',
+      ...mainKeyboard,
+    });
+
+    logger.info(`Report sent — risk:${onchain.risk} addr:${text}`);
+  } catch (err) {
+    logger.error('On-chain check failed:', err.message);
+
+    await bot.editMessageText(
+      `📋 *نتيجة الفحص الأولي*\n\n` +
+      `\`${text}\`\n\n` +
+      `✅ *صيغة العنوان:* صحيحة\n` +
+      `⚠️ *تعذّر الاتصال بالشبكة* — لم يمكن جلب البيانات الآنية.\n` +
+      `_حاول مرة أخرى بعد قليل._`,
+      {
+        chat_id:    chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: 'Markdown',
+        ...mainKeyboard,
+      }
+    );
+  }
 }
