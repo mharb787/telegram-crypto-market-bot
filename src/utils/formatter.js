@@ -1,113 +1,173 @@
 export function welcomeMessage() {
-  return (
-    `👋 *أهلاً بك في بوت مراجعة عناوين TRC20*\n\n` +
-    `🔍 *ما الذي يفعله هذا البوت؟*\n` +
-    `يقوم البوت بتحليل أي عنوان TRON (TRC20) ويعطيك تقريراً شاملاً:\n\n` +
-    `🚫 *القائمة السوداء لـ Tether* — هل حظرت Tether هذا العنوان؟\n` +
-    `📅 *عمر المحفظة* — منذ متى وهي نشطة على الشبكة؟\n` +
-    `🔗 *التعاملات المشبوهة* — هل تعاملت مع عناوين محظورة؟\n` +
-    `💰 *الرصيد الحالي* — مجموع TRX و USDT في المحفظة\n` +
-    `🛡️ *تقييم الخطورة الكلي* — درجة المخاطرة الإجمالية\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `📌 *طريقة الاستخدام:*\n` +
-    `أرسل عنوان TRC20 مباشرةً أو اضغط الزر بالأسفل 👇`
-  );
+  return rtlLines([
+    '👋 أهلا بك في بوت فحص محافظ TRON USDT.',
+    '',
+    'أرسل أي عنوان TRON وسيتم فحص:',
+    '• حالة الحظر من Tether',
+    '• رصيد USDT',
+    '• التعاملات المعروفة مع القائمة السوداء',
+    '• عمر ونشاط المحفظة',
+  ]);
 }
 
-/** Message sent while waiting for on-chain data */
 export function loadingMessage(address) {
-  return (
-    `⏳ *جاري فحص العنوان…*\n\n` +
-    `\`${address}\`\n\n` +
-    `يتم الآن الاتصال بشبكة TRON والتحقق من:\n` +
-    `• القائمة السوداء لـ Tether\n` +
-    `• عمر المحفظة وأول عملية\n` +
-    `• التعاملات مع عناوين محظورة\n` +
-    `• الرصيد الحالي\n\n` +
-    `_قد يستغرق ذلك بضع ثوانٍ…_`
-  );
+  return rtlLines([
+    '⏳ جاري فحص المحفظة...',
+    '',
+    address,
+    '',
+    'يتم التحقق من حالة الحظر، معاملات USDT، وتفاصيل المحفظة.',
+  ]);
 }
 
-/** Full report after on-chain checks */
-export function onChainReport(address, fmt, onchain) {
-  const lines = [];
+export function onChainReport(address, fmtNumber, onchain) {
+  const localCount = onchain.localRisk?.blacklistedInteractionCount ?? 0;
+  const directCount = onchain.blacklistedInteractions?.length ?? 0;
+  const blacklistTxCount = Math.max(localCount, directCount);
+  const events = collectRiskEvents(address, onchain).slice(0, 5);
+  const ageDays = onchain.age?.days;
+  const avgTxsPerDay = ageDays > 0 ? (onchain.totalTransactions ?? 0) / ageDays : 0;
 
-  // Header
-  lines.push(`📋 *تقرير مراجعة العنوان*`);
-  lines.push(`\`${address}\``);
-  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
-
-  // Format validity
-  lines.push(`✅ *صيغة العنوان:* صحيحة`);
-
-  // Tether blacklist
-  if (onchain.blacklisted === true) {
-    lines.push(`🚫 *قائمة Tether السوداء:* *محظور* ⛔`);
-  } else if (onchain.blacklisted === false) {
-    lines.push(`🚫 *قائمة Tether السوداء:* غير محظور ✅`);
-  } else {
-    lines.push(`🚫 *قائمة Tether السوداء:* تعذّر التحقق ⚠️`);
-  }
-
-  // Wallet age
-  if (onchain.age) {
-    const { date, days } = onchain.age;
-    const label = days === 0 ? 'اليوم' : days < 7 ? `${days} أيام فقط` : days < 30 ? `${days} يوماً` : `${Math.floor(days / 30)} شهراً (${days} يوم)`;
-    lines.push(`📅 *عمر المحفظة:* ${label} (منذ ${date})`);
-  } else {
-    lines.push(`📅 *عمر المحفظة:* لا يوجد نشاط مسجّل بعد`);
-  }
-
-  // Transactions reviewed
-  lines.push(`🔄 *العمليات المراجعة:* آخر ${onchain.totalTransactions} عملية TRC20`);
-
-  // Suspicious counterparties
-  if (onchain.bannedCounterparties.length > 0) {
-    lines.push(`⛔ *تعاملات مشبوهة:* ${onchain.bannedCounterparties.length} عنوان محظور في التاريخ`);
-    for (const addr of onchain.bannedCounterparties.slice(0, 3)) {
-      lines.push(`   • \`${addr}\``);
-    }
-    if (onchain.bannedCounterparties.length > 3) {
-      lines.push(`   • _…و ${onchain.bannedCounterparties.length - 3} أخرى_`);
-    }
-  } else {
-    lines.push(`🔗 *التعاملات المشبوهة:* لا توجد تعاملات مع عناوين محظورة ✅`);
-  }
-
-  // Balance
-  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`💰 *الرصيد الحالي:*`);
-  lines.push(`   • TRX:  ${fmt(onchain.balance.trx, 2)} TRX`);
-  lines.push(`   • USDT: ${fmt(onchain.balance.usdt, 2)} USDT`);
-
-  // Risk verdict
-  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`🛡️ *تقييم الخطورة الكلي:* ${riskVerdict(onchain.risk)}`);
-  lines.push(`━━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`⚠️ _هذا التقرير للاسترشاد فقط. تحقق دائماً قبل إرسال أي مبلغ._`);
-
-  return lines.join('\n');
+  return rtlLines([
+    '📋 *نتيجة فحص المحفظة*',
+    '',
+    '*الشبكة:* TRON',
+    `*العنوان:* \`${address}\``,
+    `📂 *النوع:* ${walletType(onchain, blacklistTxCount)}`,
+    `🛡️ *حالة العنوان نفسه:* ${directBlacklistStatus(onchain)}`,
+    '',
+    '💰 *الرصيد والحالة*',
+    `*USDT:* $${fmtNumber(onchain.balance?.usdt ?? 0, 2)} — ${statusLabel(onchain)}`,
+    '',
+    '🔗 *الارتباطات*',
+    connectionSummary(blacklistTxCount),
+    usdtScopeNote(onchain, blacklistTxCount),
+    '',
+    '📜 *سجل الأحداث*',
+    ...formatEvents(events, fmtNumber),
+    '',
+    '📊 *تفاصيل المحفظة*',
+    '⏱️ *السلوك:*',
+    `• *العمر:* ${ageDays ?? 'غير معروف'}${ageDays === undefined ? '' : ' يوم'}`,
+    `• *النشاط:* ${activityLabel(avgTxsPerDay, onchain.totalTransactions ?? 0)}`,
+    `• *العناوين المقابلة:* ${onchain.checkedCounterparties ?? 0}`,
+    `• *متوسط العمليات/اليوم:* ${avgTxsPerDay.toFixed(2)}`,
+  ]);
 }
 
-/** Message when address format is invalid */
 export function invalidAddressMessage(address, reason) {
-  return (
-    `⛔ *العنوان غير صالح*\n\n` +
-    `\`${address}\`\n\n` +
-    `❌ *السبب:* ${reason}`
-  );
+  return rtlLines([
+    '❌ *عنوان TRON غير صالح*',
+    '',
+    `\`${address}\``,
+    '',
+    `*السبب:* ${reason}`,
+  ]);
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+function walletType(onchain, blacklistTxCount) {
+  if (onchain.apiError) return 'فحص غير مكتمل';
+  if (onchain.blacklisted === true) return 'عنوان محظور';
+  if (blacklistTxCount > 0) return 'غير محظور لكنه تعامل مع القائمة السوداء';
+  if (onchain.blacklisted === null) return 'تعذر التحقق منه';
+  if ((onchain.totalTransactions ?? 0) === 0) return 'لا توجد معاملات USDT ضمن الفحص الحالي';
+  return 'لم تظهر مؤشرات خطر ضمن الفحص الحالي';
+}
 
-function riskVerdict(risk) {
-  const map = {
-    blacklisted: '🔴 *خطر جداً — محظور من Tether*',
-    high:        '🔴 *مرتفع — تعاملات مع عناوين محظورة*',
-    medium:      '🟡 *متوسط — محفظة حديثة جداً*',
-    safe:        '🟢 *منخفض — لا توجد مؤشرات خطر*',
-  };
-  return map[risk] ?? '⚪ غير محدد';
+function statusLabel(onchain) {
+  if (onchain.blacklisted === true) return '❌ محظور';
+  if (onchain.risk === 'high') return '⚠️ عالي الخطورة';
+  if (onchain.blacklisted === false) return '✅ غير محظور';
+  return '⚠️ غير معروف';
+}
+
+function directBlacklistStatus(onchain) {
+  if (onchain.blacklisted === true) return '❌ محظور من Tether';
+  if (onchain.blacklisted === false) return '✅ غير محظور من Tether';
+  return '⚠️ تعذر التحقق';
+}
+
+function connectionSummary(blacklistTxCount) {
+  if (blacklistTxCount === 0) {
+    return '✅ *تعاملات USDT مع القائمة السوداء:* لم تظهر ضمن الفحص الحالي';
+  }
+  if (blacklistTxCount > 0) {
+    return `⚠️ *تعاملات USDT مع القائمة السوداء:* ${blacklistTxCount} عملية`;
+  }
+}
+
+function usdtScopeNote(onchain, blacklistTxCount) {
+  if (onchain.apiError) {
+    return '⚠️ *تنبيه:* تعذر إكمال الفحص الخارجي، لذلك لا يمكن الجزم بالنتيجة النهائية';
+  }
+  if ((onchain.totalTransactions ?? 0) === 0) {
+    return 'ℹ️ *نطاق الفحص:* لم يتم العثور على معاملات USDT لهذا العنوان ضمن حد الفحص الحالي';
+  }
+  if (blacklistTxCount === 0) {
+    return `ℹ️ *نطاق الفحص:* تم فحص آخر ${onchain.reviewedTransactions ?? onchain.totalTransactions} معاملة USDT ولم تظهر تعاملات محظورة`;
+  }
+  return 'ℹ️ *نطاق الفحص:* العلاقات أعلاه محسوبة من معاملات USDT فقط';
+}
+
+function collectRiskEvents(address, onchain) {
+  const direct = (onchain.blacklistedInteractions ?? []).map(item => ({
+    timestamp: item.timestamp ?? parseDate(item.date),
+    date: item.date,
+    amount: item.amount,
+    token: item.token ?? 'USDT',
+    counterparty: item.counterparty,
+  }));
+
+  const local = (onchain.localRisk?.blacklistedInteractions ?? []).map(item => ({
+    timestamp: item.timestamp ?? parseDate(item.date),
+    date: item.date,
+    amount: item.amount,
+    token: item.token ?? 'USDT',
+    counterparty: item.blacklistedAddress ?? (item.from === address ? item.to : item.from),
+  }));
+
+  const seen = new Set();
+  return [...direct, ...local]
+    .filter(item => {
+      const key = `${item.timestamp}:${item.amount}:${item.counterparty}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+}
+
+function formatEvents(events, fmtNumber) {
+  if (events.length === 0) return ['لا توجد أحداث USDT مع عناوين محظورة ضمن البيانات الحالية.'];
+  return events.map(item => {
+    const date = item.timestamp ? formatUtcDate(item.timestamp) : (item.date ?? 'وقت غير معروف');
+    return `🔴 ${date}: ❌ *${fmtNumber(item.amount, 2)} ${item.token ?? 'USDT'}*`;
+  });
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function formatUtcDate(timestamp) {
+  const date = new Date(timestamp);
+  const pad = value => String(value).padStart(2, '0');
+  return `${pad(date.getUTCDate())}.${pad(date.getUTCMonth() + 1)}.${date.getUTCFullYear()}, ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+}
+
+function activityLabel(avgTxsPerDay, totalTransactions) {
+  if (totalTransactions === 0) return 'غير نشط';
+  if (avgTxsPerDay < 0.05) return 'نادر';
+  if (avgTxsPerDay < 1) return 'متقطع';
+  if (avgTxsPerDay < 5) return 'نشط';
+  return 'نشاط مرتفع';
+}
+
+function rtlLines(lines) {
+  const rtlMark = '\u200f';
+  return lines.map(line => (line ? `${rtlMark}${line}` : '')).join('\n');
 }
 
 export function fmt(value, decimals = 2) {

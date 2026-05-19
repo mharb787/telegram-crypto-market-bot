@@ -8,6 +8,7 @@ import {
 } from '../utils/formatter.js';
 import { mainKeyboard } from './commandHandler.js';
 import { logger }       from '../utils/logger.js';
+import { recordUsage }  from '../usageLog.js';
 
 const PROMPT_TEXT = '🔍 فحص عنوان TRC20';
 
@@ -41,18 +42,21 @@ export async function handleMessage(bot, msg) {
 
   // ── Step 2: send loading message ─────────────────────────────────────────
   logger.info(`On-chain check started — chat:${chatId} addr:${text}`);
-  await bot.sendMessage(chatId, loadingMessage(text), { parse_mode: 'Markdown' });
+  const loading = await bot.sendMessage(chatId, loadingMessage(text), { parse_mode: 'Markdown' });
 
   // ── Step 3: fetch on-chain data and send result as a new message ──────────
   try {
     const onchain = await checkOnChain(text);
+    await recordUsage(msg, text, onchain);
     logger.info(`On-chain check done — risk:${onchain.risk} addr:${text}`);
 
     const report = onChainReport(text, fmt, onchain);
+    await deleteMessageQuietly(bot, chatId, loading.message_id);
     await bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...mainKeyboard });
 
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
+    await deleteMessageQuietly(bot, chatId, loading.message_id);
     await bot.sendMessage(
       chatId,
       `✅ *صيغة العنوان صحيحة*\n\n` +
@@ -61,5 +65,13 @@ export async function handleMessage(bot, msg) {
       `حاول إرسال العنوان مرة أخرى بعد قليل.`,
       { parse_mode: 'Markdown', ...mainKeyboard }
     );
+  }
+}
+
+async function deleteMessageQuietly(bot, chatId, messageId) {
+  try {
+    await bot.deleteMessage(chatId, messageId);
+  } catch (err) {
+    logger.warn('Loading message delete failed:', err.message);
   }
 }

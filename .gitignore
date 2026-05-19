@@ -1,6 +1,9 @@
 node_modules/
 .env
 data/*.json
+data/*.lock
 !data/.gitkeep
+logs/
+telegram-crypto-market-bot/
 npm-debug.log*
 .DS_Store
