@@ -19,7 +19,9 @@ const allowedChatIds = parseIdList(process.env.ADMIN_CHAT_IDS);
 const maxListItems = Math.max(5, Number(process.env.ADMIN_LIST_LIMIT) || 10);
 const unbanMonitorIntervalMs = Math.max(60_000, Number(process.env.UNBAN_MONITOR_INTERVAL_MS) || 3_600_000);
 const unbanMonitorDelayMs = Math.max(250, Number(process.env.UNBAN_MONITOR_DELAY_MS) || 600);
+const broadcastDelayMs = Math.max(50, Number(process.env.ADMIN_BROADCAST_DELAY_MS) || 120);
 let unbanMonitorRunning = false;
+const pendingBroadcasts = new Map();
 
 if (!token) {
   logger.error('ADMIN_BOT_TOKEN is not set. Add it to your .env file.');
@@ -39,6 +41,7 @@ const adminKeyboard = {
       [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
       [{ text: '/users' }, { text: '/export_users' }],
+      [{ text: '/broadcast' }],
       [{ text: '/check_unbanned' }, { text: '/help' }],
     ],
     resize_keyboard: true,
@@ -58,6 +61,8 @@ await bot.setMyCommands([
   { command: 'user', description: 'تفاصيل مستخدم' },
   { command: 'addr', description: 'من بحث عن عنوان' },
   { command: 'export_users', description: 'تصدير سجل المستخدمين' },
+  { command: 'broadcast', description: 'إرسال رسالة لكل المستخدمين' },
+  { command: 'confirm_broadcast', description: 'تأكيد الإرسال الجماعي' },
   { command: 'check_unbanned', description: 'فحص رفع الحظر يدويا' },
   { command: 'help', description: 'عرض الأوامر' },
 ]);
@@ -182,6 +187,62 @@ bot.onText(/^\/export_users/, async (msg) => {
   const file = await writeTempFile('bot-users-usage.txt', buildUsageExport(usage));
   await bot.sendDocument(msg.chat.id, file, adminKeyboard, { filename: 'bot-users-usage.txt', contentType: 'text/plain' });
   await fs.rm(file, { force: true });
+});
+
+bot.onText(/^\/broadcast(?:\s+([\s\S]+))?/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const text = match?.[1]?.trim();
+  if (!text) {
+    await bot.sendMessage(
+      msg.chat.id,
+      'استخدم:\n<code>/broadcast نص الرسالة</code>\n\nلن يتم الإرسال إلا بعد أمر التأكيد.',
+      adminHtml
+    );
+    return;
+  }
+
+  const usage = await loadUsageLog();
+  const recipients = getBroadcastRecipients(usage);
+  if (recipients.length === 0) {
+    await bot.sendMessage(msg.chat.id, 'لا يوجد مستخدمون مسجلون للإرسال لهم.', adminHtml);
+    return;
+  }
+
+  const id = String(Date.now());
+  pendingBroadcasts.set(id, {
+    text,
+    recipients,
+    createdAt: Date.now(),
+    adminChatId: String(msg.chat.id),
+  });
+
+  await bot.sendMessage(
+    msg.chat.id,
+    formatBroadcastPreview(id, text, recipients.length),
+    adminHtml
+  );
+});
+
+bot.onText(/^\/confirm_broadcast(?:\s+(\S+))?/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const id = match?.[1]?.trim();
+  const pending = id ? pendingBroadcasts.get(id) : null;
+  if (!pending || pending.adminChatId !== String(msg.chat.id)) {
+    await bot.sendMessage(msg.chat.id, 'لا يوجد بث معلق بهذا الرقم. ابدأ من /broadcast.', adminHtml);
+    return;
+  }
+
+  if (Date.now() - pending.createdAt > 10 * 60 * 1000) {
+    pendingBroadcasts.delete(id);
+    await bot.sendMessage(msg.chat.id, 'انتهت مهلة تأكيد البث. أعد الأمر /broadcast.', adminHtml);
+    return;
+  }
+
+  pendingBroadcasts.delete(id);
+  const waiting = await bot.sendMessage(msg.chat.id, `جاري الإرسال إلى ${pending.recipients.length} مستخدم...`, adminKeyboard);
+  const result = await sendBroadcast(pending.text, pending.recipients);
+  await bot.deleteMessage(msg.chat.id, waiting.message_id).catch(() => {});
+  await bot.sendMessage(msg.chat.id, formatBroadcastResult(result), adminHtml);
 });
 
 bot.onText(/^\/check_unbanned/, async (msg) => {
@@ -546,6 +607,70 @@ function formatUnbanAlert(result) {
   ].filter(Boolean).join('\n');
 }
 
+function getBroadcastRecipients(usage) {
+  const recipients = new Map();
+  for (const user of Object.values(usage.users ?? {})) {
+    const chatId = user.chatId ?? user.userId;
+    if (!chatId) continue;
+    recipients.set(String(chatId), {
+      chatId: String(chatId),
+      userId: String(user.userId ?? chatId),
+      name: displayUser(user),
+    });
+  }
+  return [...recipients.values()];
+}
+
+function formatBroadcastPreview(id, text, count) {
+  const preview = text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  return [
+    '<b>تأكيد إرسال جماعي</b>',
+    '',
+    `عدد المستلمين: <b>${count}</b>`,
+    '',
+    '<b>نص الرسالة</b>',
+    escapeHtml(preview),
+    '',
+    'للتأكيد أرسل:',
+    `<code>/confirm_broadcast ${escapeHtml(id)}</code>`,
+    '',
+    'تنتهي مهلة التأكيد خلال 10 دقائق.',
+  ].join('\n');
+}
+
+async function sendBroadcast(text, recipients) {
+  const result = { total: recipients.length, sent: 0, failed: 0, failures: [] };
+  for (const recipient of recipients) {
+    try {
+      await bot.sendMessage(recipient.chatId, text);
+      result.sent += 1;
+    } catch (err) {
+      result.failed += 1;
+      result.failures.push({
+        chatId: recipient.chatId,
+        userId: recipient.userId,
+        error: err.message,
+      });
+      logger.warn(`Broadcast failed for ${recipient.chatId}: ${err.message}`);
+    }
+    await delay(broadcastDelayMs);
+  }
+  return result;
+}
+
+function formatBroadcastResult(result) {
+  return [
+    '<b>نتيجة الإرسال الجماعي</b>',
+    '',
+    `المستلمين: <b>${result.total}</b>`,
+    `تم الإرسال: <b>${result.sent}</b>`,
+    `فشل: <b>${result.failed}</b>`,
+    result.failures.length
+      ? `\nأول الأخطاء:\n${result.failures.slice(0, 5).map(item => `<code>${escapeHtml(item.chatId)}</code> - ${escapeHtml(item.error)}`).join('\n')}`
+      : null,
+  ].filter(Boolean).join('\n');
+}
+
 function buildUsageExport(usage) {
   const lines = [];
   const users = Object.values(usage.users ?? {})
@@ -627,6 +752,8 @@ function helpText() {
     '<code>/user USER_ID</code> تفاصيل مستخدم وعناوينه',
     '<code>/addr T...</code> من بحث عن عنوان معين',
     '<code>/export_users</code> تصدير سجل المستخدمين',
+    '<code>/broadcast نص الرسالة</code> تجهيز رسالة لكل المستخدمين',
+    '<code>/confirm_broadcast ID</code> تأكيد الإرسال الجماعي',
     '<code>/check_unbanned</code> فحص رفع الحظر يدويا',
   ].join('\n');
 /*
