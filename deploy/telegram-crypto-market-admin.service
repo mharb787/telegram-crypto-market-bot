@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram TRON Risk Admin Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-crypto-market-bot
+EnvironmentFile=/opt/telegram-crypto-market-bot/.env
+ExecStart=/usr/bin/npm run admin
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
