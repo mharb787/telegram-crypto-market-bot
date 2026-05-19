@@ -15,6 +15,7 @@ import { loadUsageLog } from './usageLog.js';
 import { logger } from './utils/logger.js';
 
 const token = process.env.ADMIN_BOT_TOKEN;
+const userBotToken = process.env.TELEGRAM_BOT_TOKEN;
 const allowedChatIds = parseIdList(process.env.ADMIN_CHAT_IDS);
 const maxListItems = Math.max(5, Number(process.env.ADMIN_LIST_LIMIT) || 10);
 const unbanMonitorIntervalMs = Math.max(60_000, Number(process.env.UNBAN_MONITOR_INTERVAL_MS) || 3_600_000);
@@ -34,6 +35,7 @@ if (allowedChatIds.size === 0) {
 }
 
 const bot = new TelegramBot(token, { polling: true });
+const userBot = userBotToken ? new TelegramBot(userBotToken, { polling: false }) : null;
 const adminKeyboard = {
   reply_markup: {
     keyboard: [
@@ -196,6 +198,15 @@ bot.onText(/^\/broadcast(?:\s+([\s\S]+))?/, async (msg, match) => {
     await bot.sendMessage(
       msg.chat.id,
       'استخدم:\n<code>/broadcast نص الرسالة</code>\n\nلن يتم الإرسال إلا بعد أمر التأكيد.',
+      adminHtml
+    );
+    return;
+  }
+
+  if (!userBot) {
+    await bot.sendMessage(
+      msg.chat.id,
+      'لا يمكن الإرسال الآن: TELEGRAM_BOT_TOKEN غير موجود في إعدادات بوت المدير على السيرفر.',
       adminHtml
     );
     return;
@@ -642,7 +653,7 @@ async function sendBroadcast(text, recipients) {
   const result = { total: recipients.length, sent: 0, failed: 0, failures: [] };
   for (const recipient of recipients) {
     try {
-      await bot.sendMessage(recipient.chatId, text);
+      await userBot.sendMessage(recipient.chatId, text);
       result.sent += 1;
     } catch (err) {
       result.failed += 1;
