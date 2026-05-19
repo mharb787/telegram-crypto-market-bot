@@ -35,7 +35,8 @@ const bot = new TelegramBot(token, { polling: true });
 const adminKeyboard = {
   reply_markup: {
     keyboard: [
-      [{ text: '/status' }, { text: '/pending' }],
+      [{ text: '/status' }, { text: '/stats' }],
+      [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
       [{ text: '/users' }, { text: '/export_users' }],
       [{ text: '/check_unbanned' }, { text: '/help' }],
@@ -48,6 +49,7 @@ const adminHtml = { parse_mode: 'HTML', ...adminKeyboard };
 
 await bot.setMyCommands([
   { command: 'status', description: 'حالة القاعدة والطابور' },
+  { command: 'stats', description: 'إحصائيات مختصرة كاملة' },
   { command: 'add', description: 'إضافة بذور' },
   { command: 'pending', description: 'العناوين المنتظرة' },
   { command: 'blocked', description: 'آخر العناوين المحظورة' },
@@ -68,7 +70,15 @@ bot.onText(/^\/start|^\/help/, async (msg) => {
 bot.onText(/^\/status/, async (msg) => {
   if (!isAllowed(msg)) return;
   const db = await loadRiskDb();
-  await bot.sendMessage(msg.chat.id, formatStatus(db), adminHtml);
+  const usage = await loadUsageLog();
+  await bot.sendMessage(msg.chat.id, formatStatus(db, usage), adminHtml);
+});
+
+bot.onText(/^\/stats/, async (msg) => {
+  if (!isAllowed(msg)) return;
+  const db = await loadRiskDb();
+  const usage = await loadUsageLog();
+  await bot.sendMessage(msg.chat.id, formatStats(db, usage), adminHtml);
 });
 
 bot.onText(/^\/add(?:\s+([\s\S]+))?/, async (msg, match) => {
@@ -320,28 +330,91 @@ function extractAddresses(text) {
   return String(text ?? '').match(/T[1-9A-HJ-NP-Za-km-z]{33}/g) ?? [];
 }
 
-function formatStatus(db) {
+function formatStatus(db, usage = null) {
   const addresses = Object.values(db.addresses ?? {});
   const blockedCount = addresses.filter(item => item.isBlacklisted === true).length;
   const queueStats = (db.queue ?? []).reduce((acc, item) => {
     acc[item.status] = (acc[item.status] ?? 0) + 1;
     return acc;
   }, {});
+  const usageStats = summarizeUsage(usage);
+  const unblockedCount = addresses.filter(item => item.wasBlacklisted === true && item.isBlacklisted === false).length;
 
   return [
-    '<b>حالة قاعدة المخاطر</b>',
+    '<b>📊 ملخص النظام</b>',
     '',
-    `العناوين المحظورة: <b>${blockedCount}</b>`,
-    `إجمالي العناوين: <b>${addresses.length}</b>`,
-    `العلاقات/التعاملات: <b>${Object.keys(db.edges ?? {}).length}</b>`,
+    '<b>🧱 قاعدة المخاطر</b>',
+    `• العناوين المحظورة: <b>${blockedCount}</b>`,
+    `• إجمالي العناوين: <b>${addresses.length}</b>`,
+    `• العلاقات: <b>${Object.keys(db.edges ?? {}).length}</b>`,
+    '',
+    '<b>⚙️ الطابور</b>',
+    `• بانتظار الفحص: <b>${queueStats.pending ?? 0}</b>`,
+    `• قيد الفحص: <b>${queueStats.running ?? 0}</b>`,
+    `• منتهية: <b>${queueStats.done ?? 0}</b>`,
+    `• فاشلة: <b>${queueStats.failed ?? 0}</b>`,
+    '',
+    '<b>👥 المستخدمون</b>',
+    `• عدد المستخدمين: <b>${usageStats.users}</b>`,
+    `• إجمالي الفحوصات: <b>${usageStats.searches}</b>`,
+    `• آخر فحص: <code>${usageStats.lastSeen ?? '-'}</code>`,
+    '',
+    '<b>🚫 رفع الحظر</b>',
+    `• تم رفع الحظر عن: <b>${unblockedCount}</b>`,
+    '',
+    '<b>🕷️ الزاحف</b>',
+    `• آخر تحديث: <code>${db.updatedAt ?? 'غير معروف'}</code>`,
+  ].join('\n');
+}
+
+function formatStats(db, usage = null) {
+  const addresses = Object.values(db.addresses ?? {});
+  const queueStats = (db.queue ?? []).reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const usageStats = summarizeUsage(usage);
+  const blocked = addresses.filter(item => item.isBlacklisted === true);
+  const notBlocked = addresses.filter(item => item.isBlacklisted === false);
+  const unknown = addresses.filter(item => item.isBlacklisted == null);
+  const unblocked = addresses.filter(item => item.wasBlacklisted === true && item.isBlacklisted === false);
+  const blacklistedEdges = Object.values(db.edges ?? {}).filter(edge => edge.blacklistedAddress);
+  const recentBlocked = blocked
+    .sort((a, b) => (b.lastChecked ?? b.firstSeen ?? '').localeCompare(a.lastChecked ?? a.firstSeen ?? ''))
+    .slice(0, 5)
+    .map(item => `• <code>${item.address}</code>`)
+    .join('\n') || '• لا يوجد';
+
+  return [
+    '<b>📈 الإحصائيات</b>',
+    '',
+    '<b>العناوين</b>',
+    `• محظورة: <b>${blocked.length}</b>`,
+    `• غير محظورة: <b>${notBlocked.length}</b>`,
+    `• غير معروفة: <b>${unknown.length}</b>`,
+    `• رُفع حظرها: <b>${unblocked.length}</b>`,
+    `• الإجمالي: <b>${addresses.length}</b>`,
+    '',
+    '<b>العلاقات</b>',
+    `• كل العلاقات: <b>${Object.keys(db.edges ?? {}).length}</b>`,
+    `• علاقات مع القائمة السوداء: <b>${blacklistedEdges.length}</b>`,
     '',
     '<b>الطابور</b>',
-    `بانتظار الفحص: <b>${queueStats.pending ?? 0}</b>`,
-    `قيد الفحص: <b>${queueStats.running ?? 0}</b>`,
-    `منتهية: <b>${queueStats.done ?? 0}</b>`,
-    `فاشلة: <b>${queueStats.failed ?? 0}</b>`,
+    `• pending: <b>${queueStats.pending ?? 0}</b>`,
+    `• running: <b>${queueStats.running ?? 0}</b>`,
+    `• done: <b>${queueStats.done ?? 0}</b>`,
+    `• failed: <b>${queueStats.failed ?? 0}</b>`,
     '',
-    `آخر تحديث: <code>${db.updatedAt ?? 'غير معروف'}</code>`,
+    '<b>المستخدمون</b>',
+    `• المستخدمون: <b>${usageStats.users}</b>`,
+    `• الفحوصات: <b>${usageStats.searches}</b>`,
+    `• العناوين الفريدة: <b>${usageStats.uniqueAddresses}</b>`,
+    `• آخر فحص: <code>${usageStats.lastSeen ?? '-'}</code>`,
+    '',
+    '<b>آخر محظور مكتشف</b>',
+    recentBlocked,
+    '',
+    `آخر تحديث للقاعدة: <code>${db.updatedAt ?? '-'}</code>`,
   ].join('\n');
 }
 
@@ -495,6 +568,27 @@ function buildUsageExport(usage) {
   return lines.join('\n');
 }
 
+function summarizeUsage(usage) {
+  if (!usage) return { users: 0, searches: 0, uniqueAddresses: 0, lastSeen: null };
+  const users = Object.values(usage.users ?? {});
+  const uniqueAddresses = new Set();
+  let searches = 0;
+  let lastSeen = null;
+
+  for (const user of users) {
+    searches += Number(user.searches ?? 0);
+    if (user.lastSeen && (!lastSeen || user.lastSeen > lastSeen)) lastSeen = user.lastSeen;
+    for (const address of Object.keys(user.addresses ?? {})) uniqueAddresses.add(address);
+  }
+
+  return {
+    users: users.length,
+    searches,
+    uniqueAddresses: uniqueAddresses.size,
+    lastSeen,
+  };
+}
+
 function buildUsersListExport(users) {
   return users.map(user => [
     `USER ${user.userId}`,
@@ -516,6 +610,7 @@ function helpText() {
     '<b>أوامر بوت المدير</b>',
     '',
     '<code>/status</code> حالة القاعدة والطابور',
+    '<code>/stats</code> إحصائيات مختصرة كاملة',
     '<code>/add T...</code> إضافة بذور',
     '<code>/pending</code> العناوين المنتظرة',
     '<code>/blocked</code> آخر العناوين المحظورة',
