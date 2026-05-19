@@ -357,13 +357,13 @@ function formatStatus(db, usage = null) {
     '<b>👥 المستخدمون</b>',
     `• عدد المستخدمين: <b>${usageStats.users}</b>`,
     `• إجمالي الفحوصات: <b>${usageStats.searches}</b>`,
-    `• آخر فحص: <code>${usageStats.lastSeen ?? '-'}</code>`,
+    `• آخر فحص: <code>${shortDate(usageStats.lastSeen)}</code>`,
     '',
     '<b>🚫 رفع الحظر</b>',
     `• تم رفع الحظر عن: <b>${unblockedCount}</b>`,
     '',
     '<b>🕷️ الزاحف</b>',
-    `• آخر تحديث: <code>${db.updatedAt ?? 'غير معروف'}</code>`,
+    `• آخر تحديث: <code>${shortDate(db.updatedAt)}</code>`,
   ].join('\n');
 }
 
@@ -409,12 +409,12 @@ function formatStats(db, usage = null) {
     `• المستخدمون: <b>${usageStats.users}</b>`,
     `• الفحوصات: <b>${usageStats.searches}</b>`,
     `• العناوين الفريدة: <b>${usageStats.uniqueAddresses}</b>`,
-    `• آخر فحص: <code>${usageStats.lastSeen ?? '-'}</code>`,
+    `• آخر فحص: <code>${shortDate(usageStats.lastSeen)}</code>`,
     '',
     '<b>آخر محظور مكتشف</b>',
     recentBlocked,
     '',
-    `آخر تحديث للقاعدة: <code>${db.updatedAt ?? '-'}</code>`,
+    `آخر تحديث للقاعدة: <code>${shortDate(db.updatedAt)}</code>`,
   ].join('\n');
 }
 
@@ -447,7 +447,7 @@ function formatBlockedList(items) {
   return [
     '<b>آخر العناوين المحظورة</b>',
     '',
-    ...items.map((item, index) => `${index + 1}. <code>${item.address}</code>\nآخر فحص: <code>${item.lastChecked ?? item.firstSeen ?? '-'}</code>`),
+    ...items.map((item, index) => `${index + 1}. <code>${item.address}</code>\nآخر فحص: <code>${shortDate(item.lastChecked ?? item.firstSeen)}</code>`),
   ].join('\n');
 }
 
@@ -460,7 +460,7 @@ function formatUsersList(users) {
       `${index + 1}. <code>${escapeHtml(user.userId)}</code>`,
       `الاسم: ${escapeHtml(displayUser(user))}`,
       `عدد الفحوصات: <b>${user.searches ?? 0}</b>`,
-      `آخر استخدام: <code>${user.lastSeen ?? '-'}</code>`,
+      `آخر استخدام: <code>${shortDate(user.lastSeen)}</code>`,
       `الأمر: <code>/user ${escapeHtml(user.userId)}</code>`,
     ].join('\n')),
   ].join('\n\n');
@@ -478,8 +478,8 @@ function formatUserDetails(user, userId) {
     `الاسم: ${escapeHtml(displayUser(user))}`,
     `Chat: <code>${escapeHtml(user.chatId ?? '-')}</code>`,
     `عدد الفحوصات: <b>${user.searches ?? 0}</b>`,
-    `أول استخدام: <code>${user.firstSeen ?? '-'}</code>`,
-    `آخر استخدام: <code>${user.lastSeen ?? '-'}</code>`,
+    `أول استخدام: <code>${shortDate(user.firstSeen)}</code>`,
+    `آخر استخدام: <code>${shortDate(user.lastSeen)}</code>`,
     '',
     '<b>آخر العناوين</b>',
     ...(addresses.length ? addresses.map(item => `<code>${item.address}</code>\nعدد: ${item.count} | آخر نتيجة: ${escapeHtml(item.lastRisk ?? '-')}`) : ['لا يوجد عناوين.']),
@@ -512,7 +512,7 @@ function formatAddressUsers(usage, address) {
         `${index + 1}. <code>${escapeHtml(user.userId)}</code>`,
         `الاسم: ${escapeHtml(displayUser(user))}`,
         `عدد مرات البحث: <b>${item.count ?? 0}</b>`,
-        `آخر بحث: <code>${item.lastSeen ?? '-'}</code>`,
+        `آخر بحث: <code>${shortDate(item.lastSeen)}</code>`,
         `آخر نتيجة: ${escapeHtml(item.lastRisk ?? '-')}`,
       ].join('\n');
     }),
@@ -603,6 +603,14 @@ function buildUsersListExport(users) {
 
 function displayUser(user) {
   return user.username || user.name || user.chatId || '-';
+}
+
+function shortDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = number => String(number).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function helpText() {
