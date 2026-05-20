@@ -134,6 +134,17 @@ export function getPendingPayment(db, user) {
   return payment;
 }
 
+export function cancelPayment(db, user, paymentId) {
+  const payment = db.payments?.[paymentId];
+  if (!payment || payment.userId !== user.userId || payment.status !== 'pending') return false;
+  payment.status = 'canceled';
+  payment.canceledAt = new Date().toISOString();
+  payment.cancelReason = 'user_canceled';
+  if (user.pendingPaymentId === paymentId) user.pendingPaymentId = null;
+  user.state = null;
+  return true;
+}
+
 export function activateSubscription(db, payment, tx) {
   const user = db.users[payment.userId];
   if (!user) return null;

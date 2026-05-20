@@ -18,6 +18,7 @@ import { logger } from '../utils/logger.js';
 import { recordUsage } from '../usageLog.js';
 import {
   addWatch,
+  cancelPayment,
   canSearch,
   consumeSearch,
   createPayment,
@@ -158,6 +159,19 @@ export async function handleCallback(bot, query) {
     const id = data.slice('payment_check:'.length);
     await bot.answerCallbackQuery(query.id, { text: 'جاري التحقق من الدفع...' });
     await verifyPaymentStatus(bot, msg.chat.id, db, user, id);
+    return;
+  }
+
+  if (data.startsWith('payment_cancel:')) {
+    const id = data.slice('payment_cancel:'.length);
+    const canceled = cancelPayment(db, user, id);
+    await saveSubscriptions(db);
+    await bot.answerCallbackQuery(query.id, { text: canceled ? 'تم إلغاء الدفعة' : 'لا توجد دفعة قابلة للإلغاء' });
+    await bot.sendMessage(
+      msg.chat.id,
+      canceled ? 'تم إلغاء نافذة الدفع. يمكنك فتح اشتراك جديد متى أردت.' : 'لا توجد نافذة دفع مفتوحة قابلة للإلغاء.',
+      { ...mainKeyboard }
+    );
   }
 }
 
@@ -275,7 +289,7 @@ async function verifyPaymentStatus(bot, chatId, db, user, paymentId) {
   await bot.sendMessage(
     chatId,
     '⏳ لم يظهر التحويل بعد.\n\nالرجاء الانتظار قليلا، وسيتم التفعيل تلقائيا عند وصول الدفع. يمكنك الضغط على "تم الدفع" مرة أخرى بعد دقيقة.',
-    paymentOptions(updated ?? payment)
+    cancelPaymentOptions(updated ?? payment)
   );
 }
 
@@ -355,7 +369,18 @@ function paymentOptions(payment) {
       inline_keyboard: [
         [{ text: 'نسخ عنوان الدفع', copy_text: { text: OWNER_USDT_ADDRESS } }],
         [{ text: 'تم الدفع', callback_data: `payment_check:${payment.id}` }],
+        [{ text: 'إلغاء الدفعة', callback_data: `payment_cancel:${payment.id}` }],
       ],
+    },
+  };
+}
+
+function cancelPaymentOptions(payment) {
+  return {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'إلغاء الدفعة', callback_data: `payment_cancel:${payment.id}` },
+      ]],
     },
   };
 }
