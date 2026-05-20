@@ -12,6 +12,7 @@ import {
 } from './crawler/riskDb.js';
 import { isBlacklistedByTether } from './api/trongrid.js';
 import { loadUsageLog } from './usageLog.js';
+import { loadSubscriptions } from './subscriptions.js';
 import { logger } from './utils/logger.js';
 
 const token = process.env.ADMIN_BOT_TOKEN;
@@ -40,9 +41,10 @@ const adminKeyboard = {
   reply_markup: {
     keyboard: [
       [{ text: '/status' }, { text: '/stats' }],
+      [{ text: '/subs' }, { text: '/users' }],
       [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
-      [{ text: '/users' }, { text: '/export_users' }],
+      [{ text: '/export_users' }],
       [{ text: '/broadcast' }],
       [{ text: '/check_unbanned' }, { text: '/help' }],
     ],
@@ -55,6 +57,7 @@ const adminHtml = { parse_mode: 'HTML', ...adminKeyboard };
 await bot.setMyCommands([
   { command: 'status', description: 'حالة القاعدة والطابور' },
   { command: 'stats', description: 'إحصائيات مختصرة كاملة' },
+  { command: 'subs', description: 'إحصائيات الاشتراكات والمدفوعات' },
   { command: 'add', description: 'إضافة بذور' },
   { command: 'pending', description: 'العناوين المنتظرة' },
   { command: 'blocked', description: 'آخر العناوين المحظورة' },
@@ -78,14 +81,22 @@ bot.onText(/^\/status/, async (msg) => {
   if (!isAllowed(msg)) return;
   const db = await loadRiskDb();
   const usage = await loadUsageLog();
-  await bot.sendMessage(msg.chat.id, formatStatus(db, usage), adminHtml);
+  const subs = await loadSubscriptions();
+  await bot.sendMessage(msg.chat.id, formatStatus(db, usage, subs), adminHtml);
 });
 
 bot.onText(/^\/stats/, async (msg) => {
   if (!isAllowed(msg)) return;
   const db = await loadRiskDb();
   const usage = await loadUsageLog();
-  await bot.sendMessage(msg.chat.id, formatStats(db, usage), adminHtml);
+  const subs = await loadSubscriptions();
+  await bot.sendMessage(msg.chat.id, formatStats(db, usage, subs), adminHtml);
+});
+
+bot.onText(/^\/subs/, async (msg) => {
+  if (!isAllowed(msg)) return;
+  const subs = await loadSubscriptions();
+  await bot.sendMessage(msg.chat.id, formatSubscriptionStats(subs), adminHtml);
 });
 
 bot.onText(/^\/add(?:\s+([\s\S]+))?/, async (msg, match) => {
@@ -402,7 +413,7 @@ function extractAddresses(text) {
   return String(text ?? '').match(/T[1-9A-HJ-NP-Za-km-z]{33}/g) ?? [];
 }
 
-function formatStatus(db, usage = null) {
+function formatStatus(db, usage = null, subs = null) {
   const addresses = Object.values(db.addresses ?? {});
   const blockedCount = addresses.filter(item => item.isBlacklisted === true).length;
   const queueStats = (db.queue ?? []).reduce((acc, item) => {
@@ -410,6 +421,7 @@ function formatStatus(db, usage = null) {
     return acc;
   }, {});
   const usageStats = summarizeUsage(usage);
+  const subStats = summarizeSubscriptions(subs);
   const unblockedCount = addresses.filter(item => item.wasBlacklisted === true && item.isBlacklisted === false).length;
 
   return [
@@ -431,6 +443,12 @@ function formatStatus(db, usage = null) {
     `• إجمالي الفحوصات: <b>${usageStats.searches}</b>`,
     `• آخر فحص: <code>${shortDate(usageStats.lastSeen)}</code>`,
     '',
+    '<b>💳 الاشتراكات</b>',
+    `• نشطة: <b>${subStats.active}</b>`,
+    `• إيراد مدفوع: <b>${fmtMoney(subStats.revenue)} USDT</b>`,
+    `• مدفوعات معلقة: <b>${subStats.pendingPayments}</b>`,
+    `• محافظ متابعة: <b>${subStats.watches}</b>`,
+    '',
     '<b>🚫 رفع الحظر</b>',
     `• تم رفع الحظر عن: <b>${unblockedCount}</b>`,
     '',
@@ -439,13 +457,14 @@ function formatStatus(db, usage = null) {
   ].join('\n');
 }
 
-function formatStats(db, usage = null) {
+function formatStats(db, usage = null, subs = null) {
   const addresses = Object.values(db.addresses ?? {});
   const queueStats = (db.queue ?? []).reduce((acc, item) => {
     acc[item.status] = (acc[item.status] ?? 0) + 1;
     return acc;
   }, {});
   const usageStats = summarizeUsage(usage);
+  const subStats = summarizeSubscriptions(subs);
   const blocked = addresses.filter(item => item.isBlacklisted === true);
   const notBlocked = addresses.filter(item => item.isBlacklisted === false);
   const unknown = addresses.filter(item => item.isBlacklisted == null);
@@ -482,6 +501,20 @@ function formatStats(db, usage = null) {
     `• الفحوصات: <b>${usageStats.searches}</b>`,
     `• العناوين الفريدة: <b>${usageStats.uniqueAddresses}</b>`,
     `• آخر فحص: <code>${shortDate(usageStats.lastSeen)}</code>`,
+    '',
+    '<b>الاشتراكات</b>',
+    `• نشطة: <b>${subStats.active}</b>`,
+    `• مجانية/غير نشطة: <b>${subStats.free}</b>`,
+    `• منتهية: <b>${subStats.expired}</b>`,
+    `• محافظ متابعة: <b>${subStats.watches}</b>`,
+    `• تنبيهات مفتوحة: <b>${subStats.openAlerts}</b>`,
+    `• إيراد مدفوع: <b>${fmtMoney(subStats.revenue)} USDT</b>`,
+    '',
+    '<b>المدفوعات</b>',
+    `• مدفوعة: <b>${subStats.paidPayments}</b>`,
+    `• معلقة: <b>${subStats.pendingPayments}</b>`,
+    `• ملغاة: <b>${subStats.canceledPayments}</b>`,
+    `• منتهية: <b>${subStats.expiredPayments}</b>`,
     '',
     '<b>آخر محظور مكتشف</b>',
     recentBlocked,
@@ -682,6 +715,111 @@ function formatBroadcastResult(result) {
   ].filter(Boolean).join('\n');
 }
 
+function summarizeSubscriptions(subs) {
+  const users = Object.values(subs?.users ?? {});
+  const payments = Object.values(subs?.payments ?? {});
+  const alerts = Object.values(subs?.alerts ?? {});
+  const now = Date.now();
+  let active = 0;
+  let expired = 0;
+  let free = 0;
+  let watches = 0;
+  let paidSearchesToday = 0;
+  let freeSearchesThisWeek = 0;
+  let activeWatchesUsers = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const week = currentWeekKey();
+
+  for (const user of users) {
+    const expiresAt = Date.parse(user.subscription?.expiresAt ?? '');
+    if (Number.isFinite(expiresAt) && expiresAt > now) active += 1;
+    else if (Number.isFinite(expiresAt) && expiresAt <= now) expired += 1;
+    else free += 1;
+
+    const userWatches = user.watches?.length ?? 0;
+    watches += userWatches;
+    if (userWatches > 0) activeWatchesUsers += 1;
+    if (user.usage?.paidDayKey === today) paidSearchesToday += Number(user.usage.paidDayCount ?? 0);
+    if (user.usage?.freeWeekKey === week) freeSearchesThisWeek += Number(user.usage.freeWeekCount ?? 0);
+  }
+
+  const paid = payments.filter(item => item.status === 'paid');
+  return {
+    users: users.length,
+    active,
+    expired,
+    free,
+    watches,
+    activeWatchesUsers,
+    paidSearchesToday,
+    freeSearchesThisWeek,
+    paidPayments: paid.length,
+    pendingPayments: payments.filter(item => item.status === 'pending').length,
+    canceledPayments: payments.filter(item => item.status === 'canceled').length,
+    expiredPayments: payments.filter(item => item.status === 'expired').length,
+    revenue: paid.reduce((sum, item) => sum + Number(item.receivedAmount ?? item.amount ?? 0), 0),
+    openAlerts: alerts.filter(item => !item.muted && Number(item.sentCount ?? 0) < 5).length,
+    mutedAlerts: alerts.filter(item => item.muted).length,
+    alerts: alerts.length,
+    updatedAt: subs?.updatedAt ?? null,
+  };
+}
+
+function formatSubscriptionStats(subs) {
+  const stats = summarizeSubscriptions(subs);
+  const recentPaid = Object.values(subs?.payments ?? {})
+    .filter(item => item.status === 'paid')
+    .sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''))
+    .slice(0, 5)
+    .map(item => `• <code>${escapeHtml(item.userId)}</code> — <b>${fmtMoney(item.receivedAmount ?? item.amount)} USDT</b> — ${shortDate(item.paidAt)}`)
+    .join('\n') || '• لا يوجد';
+  const expiringSoon = Object.values(subs?.users ?? {})
+    .filter(user => {
+      const expiresAt = Date.parse(user.subscription?.expiresAt ?? '');
+      return Number.isFinite(expiresAt) && expiresAt > Date.now();
+    })
+    .sort((a, b) => (a.subscription.expiresAt ?? '').localeCompare(b.subscription.expiresAt ?? ''))
+    .slice(0, 5)
+    .map(user => `• <code>${escapeHtml(user.userId)}</code> — ${escapeHtml(displayUser(user))} — ${shortDate(user.subscription.expiresAt)}`)
+    .join('\n') || '• لا يوجد';
+
+  return [
+    '<b>💳 إحصائيات الاشتراكات</b>',
+    '',
+    '<b>المستخدمون</b>',
+    `• إجمالي مستخدمي النظام: <b>${stats.users}</b>`,
+    `• مشتركين نشطين: <b>${stats.active}</b>`,
+    `• مجاني/غير نشط: <b>${stats.free}</b>`,
+    `• منتهية اشتراكاتهم: <b>${stats.expired}</b>`,
+    '',
+    '<b>الاستخدام</b>',
+    `• فحوصات المشتركين اليوم: <b>${stats.paidSearchesToday}</b>`,
+    `• فحوصات المجاني هذا الأسبوع: <b>${stats.freeSearchesThisWeek}</b>`,
+    `• محافظ متابعة: <b>${stats.watches}</b>`,
+    `• مستخدمون لديهم متابعة: <b>${stats.activeWatchesUsers}</b>`,
+    '',
+    '<b>المدفوعات</b>',
+    `• مدفوعة: <b>${stats.paidPayments}</b>`,
+    `• معلقة: <b>${stats.pendingPayments}</b>`,
+    `• ملغاة: <b>${stats.canceledPayments}</b>`,
+    `• منتهية: <b>${stats.expiredPayments}</b>`,
+    `• إجمالي الإيراد: <b>${fmtMoney(stats.revenue)} USDT</b>`,
+    '',
+    '<b>التنبيهات</b>',
+    `• إجمالي التنبيهات: <b>${stats.alerts}</b>`,
+    `• مفتوحة/تتكرر: <b>${stats.openAlerts}</b>`,
+    `• مكتومة: <b>${stats.mutedAlerts}</b>`,
+    '',
+    '<b>آخر المدفوعات</b>',
+    recentPaid,
+    '',
+    '<b>أقرب الاشتراكات انتهاء</b>',
+    expiringSoon,
+    '',
+    `آخر تحديث: <code>${shortDate(stats.updatedAt)}</code>`,
+  ].join('\n');
+}
+
 function buildUsageExport(usage) {
   const lines = [];
   const users = Object.values(usage.users ?? {})
@@ -749,12 +887,30 @@ function shortDate(value) {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function fmtMoney(value) {
+  return Number(value ?? 0).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function currentWeekKey() {
+  const date = new Date();
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86_400_000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
 function helpText() {
   return [
     '<b>أوامر بوت المدير</b>',
     '',
     '<code>/status</code> حالة القاعدة والطابور',
     '<code>/stats</code> إحصائيات مختصرة كاملة',
+    '<code>/subs</code> إحصائيات الاشتراكات والمدفوعات',
     '<code>/add T...</code> إضافة بذور',
     '<code>/pending</code> العناوين المنتظرة',
     '<code>/blocked</code> آخر العناوين المحظورة',
