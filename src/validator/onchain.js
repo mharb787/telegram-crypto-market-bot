@@ -27,7 +27,9 @@ const MIN_USER_AUDIT_USDT = Math.max(0, Number(process.env.MIN_USER_AUDIT_USDT) 
  * Runs all on-chain checks for a TRC20 address.
  * Returns a structured result object.
  */
-export async function checkOnChain(address) {
+export async function checkOnChain(address, options = {}) {
+  const reviewLimit = Math.max(50, Number(options.maxReviewedTransfers) || MAX_REVIEWED_USDT_TRANSFERS);
+  const minAuditUsdt = Math.max(0, Number(options.minAuditUsdt ?? MIN_USER_AUDIT_USDT));
   const account = await settle(() => getAccount(address));
   await delay(400);
   const blacklisted = await settle(() => isBlacklistedByTether(address));
@@ -38,7 +40,7 @@ export async function checkOnChain(address) {
   await delay(400);
   const firstTx = await settle(() => getFirstTransaction(address));
   await delay(400);
-  const transfers = await settle(() => getRecentUSDTTransfers(address, { maxTransactions: MAX_REVIEWED_USDT_TRANSFERS }));
+  const transfers = await settle(() => getRecentUSDTTransfers(address, { maxTransactions: reviewLimit }));
 
   const acc       = account.status    === 'fulfilled' ? account.value    : null;
   const isBanned  = blacklisted.status === 'fulfilled' ? blacklisted.value : null;
@@ -62,10 +64,10 @@ export async function checkOnChain(address) {
 
   // ── Suspicious counterparties across recent USDT transfers ───────────────
   const usdtTransfers = txList.filter(isUsdtTransfer);
-  const auditTransfers = usdtTransfers.filter(tx => transferAmount(tx) >= MIN_USER_AUDIT_USDT);
+  const auditTransfers = usdtTransfers.filter(tx => transferAmount(tx) >= minAuditUsdt);
   const counterparties = uniqueCounterparties(address, auditTransfers);
   const local = localRisk.status === 'fulfilled' ? localRisk.value : null;
-  const shouldAuditCounterparties = VERIFY_COUNTERPARTIES_WITH_TETHER || !local?.blacklistedInteractionCount;
+  const shouldAuditCounterparties = options.forceCounterpartyAudit || VERIFY_COUNTERPARTIES_WITH_TETHER || !local?.blacklistedInteractionCount;
   const blacklistAudit = shouldAuditCounterparties
     ? await auditBlacklistedCounterparties(address, auditTransfers, counterparties)
     : { bannedCounterparties: [], interactions: [], unknownCounterparties: [] };
@@ -92,7 +94,7 @@ export async function checkOnChain(address) {
     age:                  ageInfo,
     totalTransactions:    usdtTransfers.length,
     reviewedTransactions: txList.length,
-    reviewLimit:          MAX_REVIEWED_USDT_TRANSFERS,
+    reviewLimit,
     transferHistoryIncomplete: Boolean(txList.incomplete),
     tetherCounterpartyVerification: shouldAuditCounterparties,
     externalCounterpartyAudit: shouldAuditCounterparties,

@@ -1,6 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { handleStart }   from './handlers/commandHandler.js';
-import { handleMessage } from './handlers/messageHandler.js';
+import { handleCallback, handleMessage } from './handlers/messageHandler.js';
+import { startSubscriptionTasks } from './subscriptionTasks.js';
 import { logger }        from './utils/logger.js';
 
 export function createBot(token) {
@@ -21,7 +22,15 @@ export function createBot(token) {
     );
   });
 
+  bot.on('callback_query', (query) => {
+    handleCallback(bot, query).catch((err) =>
+      logger.error('handleCallback error:', err)
+    );
+  });
+
   bot.on('polling_error', (err) => logger.error('Polling error:', err.message));
+
+  startSubscriptionTasks(bot);
 
   return bot;
 }
