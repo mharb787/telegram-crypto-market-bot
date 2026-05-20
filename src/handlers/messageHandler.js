@@ -323,9 +323,9 @@ function paymentInstructions(payment) {
   return [
     '✅ تم فتح نافذة دفع لك.',
     '',
-    `ادفع: ${payment.amount} USDT TRC20`,
-    `من: ${payment.fromAddress}`,
-    `إلى: ${OWNER_USDT_ADDRESS}`,
+    `ادفع: <b>${payment.amount} USDT TRC20</b>`,
+    `من: <code>${payment.fromAddress}</code>`,
+    `إلى: <code>${OWNER_USDT_ADDRESS}</code>`,
     '',
     `يجب وصول الدفعة خلال ${paymentWindowMinutes()} دقيقة.`,
     'عند وصول التحويل سيتم تفعيل الاشتراك تلقائيا.',
@@ -338,9 +338,9 @@ function pendingPaymentText(payment) {
   return [
     '⏳ لديك نافذة دفع مفتوحة بالفعل.',
     '',
-    `ادفع: ${payment.amount} USDT TRC20`,
-    `من: ${payment.fromAddress}`,
-    `إلى: ${OWNER_USDT_ADDRESS}`,
+    `ادفع: <b>${payment.amount} USDT TRC20</b>`,
+    `من: <code>${payment.fromAddress}</code>`,
+    `إلى: <code>${OWNER_USDT_ADDRESS}</code>`,
     `تنتهي: ${shortDate(payment.expiresAt)}`,
     '',
     'إذا دفعت بالفعل اضغط "تم الدفع" أو أرسل /paid.',
@@ -350,10 +350,12 @@ function pendingPaymentText(payment) {
 
 function paymentOptions(payment) {
   return {
+    parse_mode: 'HTML',
     reply_markup: {
-      inline_keyboard: [[
-        { text: 'تم الدفع', callback_data: `payment_check:${payment.id}` },
-      ]],
+      inline_keyboard: [
+        [{ text: 'نسخ عنوان الدفع', copy_text: { text: OWNER_USDT_ADDRESS } }],
+        [{ text: 'تم الدفع', callback_data: `payment_check:${payment.id}` }],
+      ],
     },
   };
 }
