@@ -36,7 +36,7 @@ import {
   touchUser,
   watchLimit,
 } from '../subscriptions.js';
-import { scanPayments } from '../subscriptionTasks.js';
+import { scanPayments, scanSingleWatchedWallet } from '../subscriptionTasks.js';
 
 export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
@@ -327,7 +327,25 @@ async function handleAddWatch(bot, msg, db, user, text) {
 
   const result = addWatch(user, text);
   await saveSubscriptions(db);
-  await bot.sendMessage(chatId, watchResultText(result), result.ok ? watchedWalletsOptions(user) : { ...mainKeyboard });
+  if (!result.ok) {
+    await bot.sendMessage(chatId, watchResultText(result), { ...mainKeyboard });
+    return;
+  }
+
+  const waiting = await bot.sendMessage(chatId, '✅ تم إضافة المحفظة للمتابعة.\n\nجاري فحصها بدقة الآن...');
+  const freshDb = await loadSubscriptions();
+  const freshUser = freshDb.users?.[user.userId];
+  const freshWatch = freshUser?.watches?.find(item => item.id === result.watch.id);
+  if (!freshUser || !freshWatch) {
+    await deleteMessageQuietly(bot, chatId, waiting.message_id);
+    await bot.sendMessage(chatId, 'تمت الإضافة، لكن تعذر تشغيل الفحص الفوري الآن.', { ...mainKeyboard });
+    return;
+  }
+
+  const scan = await scanSingleWatchedWallet(freshDb, freshUser, freshWatch);
+  await saveSubscriptions(freshDb);
+  await deleteMessageQuietly(bot, chatId, waiting.message_id);
+  await bot.sendMessage(chatId, immediateWatchScanText(scan), watchedWalletsOptions(freshUser));
 }
 
 async function handleEditWatch(bot, msg, db, user, text) {
@@ -479,6 +497,27 @@ function watchResultText(result) {
   if (result.reason === 'exists') return 'هذه المحفظة موجودة مسبقا في المتابعة.';
   if (result.reason === 'limit') return `وصلت للحد الأقصى: ${watchLimit()} محافظ.`;
   return 'تعذر تنفيذ العملية.';
+}
+
+function immediateWatchScanText(scan) {
+  if (scan.error) {
+    return `تمت إضافة المحفظة، لكن تعذر إكمال الفحص الفوري الآن.\n\nالسبب: ${scan.error.message}\nسيعاد فحصها تلقائيا كل ساعة.`;
+  }
+
+  if (scan.alertsCreated > 0) {
+    return [
+      '🚨 تمت إضافة المحفظة وتم رصد تعامل USDT مؤكد مع عنوان محظور.',
+      '',
+      `عدد الأحداث: ${scan.alertsCreated}`,
+      'سيتم إرسال تنبيه المخاطر ومتابعته تلقائيا.',
+    ].join('\n');
+  }
+
+  if (scan.onchain?.apiError) {
+    return 'تمت إضافة المحفظة، لكن الفحص الفوري غير مكتمل بسبب ضغط أو خطأ من مزود الشبكة. سيعاد فحصها تلقائيا كل ساعة.';
+  }
+
+  return '✅ تمت إضافة المحفظة وفحصها الآن.\nلم يظهر تعامل USDT مؤكد مع عنوان محظور ضمن آخر 1000 معاملة.';
 }
 
 function shortDate(value) {

@@ -14,10 +14,10 @@ import {
 import { logger } from './utils/logger.js';
 
 const PAYMENT_SCAN_MS = Math.max(30_000, Number(process.env.PAYMENT_SCAN_MS) || 60_000);
-const WATCH_SCAN_MS = Math.max(60_000, Number(process.env.WATCH_SCAN_MS) || 15 * 60_000);
+const WATCH_SCAN_MS = Math.max(60_000, Number(process.env.WATCH_SCAN_MS) || 60 * 60_000);
 const ALERT_SCAN_MS = Math.max(60_000, Number(process.env.ALERT_SCAN_MS) || 5 * 60_000);
 const REMINDER_SCAN_MS = Math.max(60_000, Number(process.env.REMINDER_SCAN_MS) || 60 * 60_000);
-const WATCH_REVIEW_LIMIT = Math.max(200, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 5000);
+const WATCH_REVIEW_LIMIT = Math.max(200, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 1000);
 
 let paymentScanRunning = false;
 let watchScanRunning = false;
@@ -77,36 +77,52 @@ async function scanWatchedWallets() {
     for (const user of Object.values(db.users ?? {})) {
       if (!isSubscribed(user)) continue;
       for (const watch of user.watches ?? []) {
-        try {
-          const onchain = await checkOnChain(watch.address, {
-            maxReviewedTransfers: WATCH_REVIEW_LIMIT,
-            minAuditUsdt: 0,
-            forceCounterpartyAudit: true,
-          });
-          watch.lastCheckedAt = new Date().toISOString();
-          changed = true;
-
-          const interactions = [
-            ...(onchain.blacklistedInteractions ?? []),
-            ...(onchain.localRisk?.blacklistedInteractions ?? []),
-          ];
-          for (const interaction of interactions) {
-            const result = createOrGetAlert(db, {
-              userId: user.userId,
-              chatId: user.chatId,
-              watchAddress: watch.address,
-              interaction,
-            });
-            changed = changed || result.created;
-          }
-        } catch (err) {
-          logger.warn(`Watched wallet scan failed ${watch.address}: ${err.message}`);
-        }
+        const result = await scanSingleWatchedWallet(db, user, watch);
+        changed = changed || result.changed;
       }
     }
     if (changed) await saveSubscriptions(db);
   } finally {
     watchScanRunning = false;
+  }
+}
+
+export async function scanSingleWatchedWallet(db, user, watch) {
+  try {
+    const onchain = await checkOnChain(watch.address, {
+      maxReviewedTransfers: WATCH_REVIEW_LIMIT,
+      minAuditUsdt: 0,
+      forceCounterpartyAudit: true,
+    });
+    watch.lastCheckedAt = new Date().toISOString();
+    watch.lastStatus = onchain.apiError ? 'incomplete' : 'checked';
+    watch.lastRisk = onchain.risk ?? null;
+    watch.lastError = null;
+
+    let changed = true;
+    const currentInteractions = onchain.blacklistedInteractions ?? [];
+    for (const interaction of currentInteractions) {
+      const result = createOrGetAlert(db, {
+        userId: user.userId,
+        chatId: user.chatId,
+        watchAddress: watch.address,
+        interaction,
+      });
+      changed = changed || result.created;
+    }
+
+    return {
+      changed,
+      onchain,
+      alertsCreated: currentInteractions.length,
+      interactions: currentInteractions,
+    };
+  } catch (err) {
+    watch.lastCheckedAt = new Date().toISOString();
+    watch.lastStatus = 'failed';
+    watch.lastError = err.message;
+    logger.warn(`Watched wallet scan failed ${watch.address}: ${err.message}`);
+    return { changed: true, error: err };
   }
 }
 
