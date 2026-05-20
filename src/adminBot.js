@@ -10,7 +10,7 @@ import {
   saveRiskDb,
   upsertAddress,
 } from './crawler/riskDb.js';
-import { isBlacklistedByTether } from './api/trongrid.js';
+import { checkBlacklistConstantContract, isBlacklistedByTether } from './api/trongrid.js';
 import { loadUsageLog } from './usageLog.js';
 import { loadSubscriptions } from './subscriptions.js';
 import { logger } from './utils/logger.js';
@@ -21,6 +21,7 @@ const allowedChatIds = parseIdList(process.env.ADMIN_CHAT_IDS);
 const maxListItems = Math.max(5, Number(process.env.ADMIN_LIST_LIMIT) || 10);
 const unbanMonitorIntervalMs = Math.max(60_000, Number(process.env.UNBAN_MONITOR_INTERVAL_MS) || 3_600_000);
 const unbanMonitorDelayMs = Math.max(250, Number(process.env.UNBAN_MONITOR_DELAY_MS) || 600);
+const unbanConfirmDelayMs = Math.max(500, Number(process.env.UNBAN_CONFIRM_DELAY_MS) || 1500);
 const broadcastDelayMs = Math.max(50, Number(process.env.ADMIN_BROADCAST_DELAY_MS) || 120);
 let unbanMonitorRunning = false;
 const pendingBroadcasts = new Map();
@@ -363,14 +364,19 @@ async function checkUnbannedAddresses() {
       try {
         const status = await isBlacklistedByTether(item.address);
         if (status === false) {
-          upsertAddress(db, item.address, {
-            isBlacklisted: false,
-            wasBlacklisted: true,
-            unblacklistedAt: now,
-            lastChecked: now,
-            sources: ['unban_monitor'],
-          });
-          unbanned.push(item.address);
+          const confirmed = await confirmUnbanned(item.address);
+          if (confirmed.ok) {
+            upsertAddress(db, item.address, {
+              isBlacklisted: false,
+              wasBlacklisted: true,
+              unblacklistedAt: now,
+              lastChecked: now,
+              sources: ['unban_monitor'],
+            });
+            unbanned.push(item.address);
+          } else {
+            errors.push({ address: item.address, error: `unban_not_confirmed:${confirmed.results.join(',')}` });
+          }
         } else if (status === true) {
           upsertAddress(db, item.address, {
             isBlacklisted: true,
@@ -392,6 +398,23 @@ async function checkUnbannedAddresses() {
   } finally {
     unbanMonitorRunning = false;
   }
+}
+
+async function confirmUnbanned(address) {
+  const results = [];
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const status = await checkBlacklistConstantContract(address);
+      results.push(status);
+      if (status !== false) return { ok: false, results };
+    } catch (err) {
+      logger.warn(`Unban confirmation failed for ${address}: ${err.message}`);
+      results.push('error');
+      return { ok: false, results };
+    }
+    if (i < 2) await delay(unbanConfirmDelayMs);
+  }
+  return { ok: true, results };
 }
 
 async function runAutomaticUnbanMonitor() {

@@ -154,7 +154,7 @@ function parseContractBool(value) {
  * contract endpoint. This avoids JSON-RPC selector compatibility issues.
  * Returns true | false | null (null = could not determine).
  */
-async function checkBlacklistConstantContract(address) {
+export async function checkBlacklistConstantContract(address) {
   const evmHex = addressToEvmHex(address);
   if (!evmHex) return null;
 
