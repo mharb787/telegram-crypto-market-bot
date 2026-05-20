@@ -154,7 +154,7 @@ function parseDate(value) {
 function formatUtcDate(timestamp) {
   const date = new Date(timestamp);
   const pad = value => String(value).padStart(2, '0');
-  return `${pad(date.getUTCDate())}.${pad(date.getUTCMonth() + 1)}.${date.getUTCFullYear()}, ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+  return `${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 
 function activityLabel(avgTxsPerDay, totalTransactions) {
