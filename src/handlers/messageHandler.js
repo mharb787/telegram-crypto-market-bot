@@ -69,9 +69,9 @@ export async function handleMessage(bot, msg) {
       return;
     }
 
-    user.state = { type: 'payment_from_address' };
+    user.state = null;
     await saveSubscriptions(db);
-    await bot.sendMessage(chatId, subscriptionOfferText(), { ...mainKeyboard });
+    await bot.sendMessage(chatId, subscriptionOfferText(), subscribeNowOptions());
     return;
   }
 
@@ -159,6 +159,30 @@ export async function handleCallback(bot, query) {
     const id = data.slice('payment_check:'.length);
     await bot.answerCallbackQuery(query.id, { text: 'جاري التحقق من الدفع...' });
     await verifyPaymentStatus(bot, msg.chat.id, db, user, id);
+    return;
+  }
+
+  if (data === 'subscribe_now') {
+    if (isSubscribed(user)) {
+      user.state = null;
+      await saveSubscriptions(db);
+      await bot.answerCallbackQuery(query.id, { text: 'اشتراكك فعال حاليا' });
+      await bot.sendMessage(msg.chat.id, `✅ اشتراكك فعال حتى ${shortDate(user.subscription.expiresAt)}.`, { ...mainKeyboard });
+      return;
+    }
+
+    const pending = getPendingPayment(db, user);
+    if (pending) {
+      await saveSubscriptions(db);
+      await bot.answerCallbackQuery(query.id, { text: 'لديك نافذة دفع مفتوحة' });
+      await bot.sendMessage(msg.chat.id, pendingPaymentText(pending), paymentOptions(pending));
+      return;
+    }
+
+    user.state = { type: 'payment_from_address' };
+    await saveSubscriptions(db);
+    await bot.answerCallbackQuery(query.id, { text: 'أرسل عنوان الدفع' });
+    await bot.sendMessage(msg.chat.id, 'أرسل عنوان TRC20 الذي سترسل منه الدفعة.', { ...mainKeyboard });
     return;
   }
 
@@ -328,9 +352,17 @@ function subscriptionOfferText() {
     '• 50 فحص يوميا',
     `• متابعة مخاطر حتى ${watchLimit()} محافظ`,
     '• تنبيهات تلقائية عند ظهور تعاملات خطرة',
-    '',
-    'أرسل الآن عنوان المحفظة التي ستدفع منها.',
   ].join('\n');
+}
+
+function subscribeNowOptions() {
+  return {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'اشترك الآن', callback_data: 'subscribe_now' },
+      ]],
+    },
+  };
 }
 
 function paymentInstructions(payment) {
