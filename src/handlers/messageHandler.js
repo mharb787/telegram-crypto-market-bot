@@ -347,7 +347,8 @@ function subscriptionOfferText() {
   return [
     '💳 الاشتراك الشهري',
     '',
-    `السعر: ${subscriptionPrice()} USDT TRC20`,
+    `السعر: ${subscriptionPrice()} USDT`,
+    'الشبكة: TRC20',
     'المزايا:',
     '• 50 فحص يوميا',
     `• متابعة مخاطر حتى ${watchLimit()} محافظ`,
