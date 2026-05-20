@@ -21,6 +21,7 @@ import {
   canSearch,
   consumeSearch,
   createPayment,
+  getPendingPayment,
   getSearchAllowance,
   isSubscribed,
   loadSubscriptions,
@@ -34,6 +35,7 @@ import {
   touchUser,
   watchLimit,
 } from '../subscriptions.js';
+import { scanPayments } from '../subscriptionTasks.js';
 
 export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
@@ -52,6 +54,20 @@ export async function handleMessage(bot, msg) {
   }
 
   if (text === SUBSCRIBE_BUTTON) {
+    if (isSubscribed(user)) {
+      user.state = null;
+      await saveSubscriptions(db);
+      await bot.sendMessage(chatId, `✅ اشتراكك فعال حتى ${shortDate(user.subscription.expiresAt)}.\n\nيمكنك استخدام الفحص المدفوع ومتابعة المحافظ الآن.`, { ...mainKeyboard });
+      return;
+    }
+
+    const pending = getPendingPayment(db, user);
+    if (pending) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(chatId, pendingPaymentText(pending), paymentOptions(pending));
+      return;
+    }
+
     user.state = { type: 'payment_from_address' };
     await saveSubscriptions(db);
     await bot.sendMessage(chatId, subscriptionOfferText(), { ...mainKeyboard });
@@ -135,7 +151,26 @@ export async function handleCallback(bot, query) {
     const muted = muteAlert(db, id);
     await saveSubscriptions(db);
     await bot.answerCallbackQuery(query.id, { text: muted ? 'تم كتم التنبيه' : 'التنبيه غير موجود' });
+    return;
   }
+
+  if (data.startsWith('payment_check:')) {
+    const id = data.slice('payment_check:'.length);
+    await bot.answerCallbackQuery(query.id, { text: 'جاري التحقق من الدفع...' });
+    await verifyPaymentStatus(bot, msg.chat.id, db, user, id);
+  }
+}
+
+export async function handlePaidCommand(bot, msg) {
+  const db = await loadSubscriptions();
+  const user = touchUser(db, msg);
+  const pending = getPendingPayment(db, user);
+  if (!pending) {
+    await saveSubscriptions(db);
+    await bot.sendMessage(msg.chat.id, 'لا توجد نافذة دفع مفتوحة حاليا. اضغط زر الاشتراك للبدء.', { ...mainKeyboard });
+    return;
+  }
+  await verifyPaymentStatus(bot, msg.chat.id, db, user, pending.id);
 }
 
 async function handleWalletCheck(bot, msg, db, user, text) {
@@ -189,6 +224,21 @@ async function handleWalletCheck(bot, msg, db, user, text) {
 
 async function handlePaymentAddress(bot, msg, db, user, text) {
   const chatId = msg.chat.id;
+  if (isSubscribed(user)) {
+    user.state = null;
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, `✅ اشتراكك فعال حتى ${shortDate(user.subscription.expiresAt)}. لا تحتاج فتح نافذة دفع جديدة.`, { ...mainKeyboard });
+    return;
+  }
+
+  const existing = getPendingPayment(db, user);
+  if (existing) {
+    user.state = null;
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, pendingPaymentText(existing), paymentOptions(existing));
+    return;
+  }
+
   const formatResult = validateTRC20(text);
   if (!formatResult.valid) {
     await bot.sendMessage(chatId, 'العنوان غير صالح. أرسل عنوان TRON للمحفظة التي ستدفع منها.', { ...mainKeyboard });
@@ -197,7 +247,36 @@ async function handlePaymentAddress(bot, msg, db, user, text) {
 
   const payment = createPayment(db, user, text);
   await saveSubscriptions(db);
-  await bot.sendMessage(chatId, paymentInstructions(payment), { ...mainKeyboard });
+  await bot.sendMessage(chatId, paymentInstructions(payment), paymentOptions(payment));
+}
+
+async function verifyPaymentStatus(bot, chatId, db, user, paymentId) {
+  const payment = db.payments?.[paymentId];
+  if (!payment || payment.userId !== user.userId) {
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, 'لا توجد نافذة دفع مطابقة لهذا الطلب.', { ...mainKeyboard });
+    return;
+  }
+
+  await scanPayments(bot);
+  const fresh = await loadSubscriptions();
+  const updated = fresh.payments?.[paymentId];
+  const freshUser = fresh.users?.[user.userId];
+  if (updated?.status === 'paid' || isSubscribed(freshUser)) {
+    await bot.sendMessage(chatId, '✅ تم تأكيد الدفع وتفعيل الاشتراك بنجاح.', { ...mainKeyboard });
+    return;
+  }
+
+  if (updated?.status === 'expired') {
+    await bot.sendMessage(chatId, 'انتهت نافذة الدفع. اضغط زر الاشتراك لفتح نافذة جديدة.', { ...mainKeyboard });
+    return;
+  }
+
+  await bot.sendMessage(
+    chatId,
+    '⏳ لم يظهر التحويل بعد.\n\nالرجاء الانتظار قليلا، وسيتم التفعيل تلقائيا عند وصول الدفع. يمكنك الضغط على "تم الدفع" مرة أخرى بعد دقيقة.',
+    paymentOptions(updated ?? payment)
+  );
 }
 
 async function handleAddWatch(bot, msg, db, user, text) {
@@ -250,7 +329,33 @@ function paymentInstructions(payment) {
     '',
     `يجب وصول الدفعة خلال ${paymentWindowMinutes()} دقيقة.`,
     'عند وصول التحويل سيتم تفعيل الاشتراك تلقائيا.',
+    '',
+    'بعد الدفع اضغط زر "تم الدفع" أو أرسل /paid للتحقق السريع.',
   ].join('\n');
+}
+
+function pendingPaymentText(payment) {
+  return [
+    '⏳ لديك نافذة دفع مفتوحة بالفعل.',
+    '',
+    `ادفع: ${payment.amount} USDT TRC20`,
+    `من: ${payment.fromAddress}`,
+    `إلى: ${OWNER_USDT_ADDRESS}`,
+    `تنتهي: ${shortDate(payment.expiresAt)}`,
+    '',
+    'إذا دفعت بالفعل اضغط "تم الدفع" أو أرسل /paid.',
+    'إذا لم يظهر الدفع مباشرة، الرجاء الانتظار قليلا حتى تؤكده الشبكة.',
+  ].join('\n');
+}
+
+function paymentOptions(payment) {
+  return {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'تم الدفع', callback_data: `payment_check:${payment.id}` },
+      ]],
+    },
+  };
 }
 
 function paywallText(user) {

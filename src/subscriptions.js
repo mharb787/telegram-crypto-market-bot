@@ -102,6 +102,9 @@ export function consumeSearch(user, now = new Date()) {
 }
 
 export function createPayment(db, user, fromAddress) {
+  const existing = getPendingPayment(db, user);
+  if (existing) return existing;
+
   const now = Date.now();
   const id = `${user.userId}-${now}`;
   const payment = {
@@ -120,6 +123,14 @@ export function createPayment(db, user, fromAddress) {
   db.payments[id] = payment;
   user.pendingPaymentId = id;
   user.state = null;
+  return payment;
+}
+
+export function getPendingPayment(db, user) {
+  const id = user?.pendingPaymentId;
+  const payment = id ? db.payments?.[id] : null;
+  if (!payment || payment.status !== 'pending') return null;
+  if (Date.parse(payment.expiresAt) <= Date.now()) return null;
   return payment;
 }
 
@@ -146,9 +157,17 @@ export function expireOldPayments(db) {
   let changed = false;
   for (const payment of Object.values(db.payments ?? {})) {
     if (payment.status !== 'pending') continue;
+    const user = db.users[payment.userId];
+    if (isSubscribed(user)) {
+      payment.status = 'canceled';
+      payment.canceledAt = new Date(now).toISOString();
+      payment.cancelReason = 'subscription_active';
+      if (user?.pendingPaymentId === payment.id) user.pendingPaymentId = null;
+      changed = true;
+      continue;
+    }
     if (Date.parse(payment.expiresAt) > now) continue;
     payment.status = 'expired';
-    const user = db.users[payment.userId];
     if (user?.pendingPaymentId === payment.id) user.pendingPaymentId = null;
     changed = true;
   }

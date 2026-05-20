@@ -34,7 +34,7 @@ export function startSubscriptionTasks(bot) {
   sendDueAlerts(bot).catch(err => logger.warn('Initial alert scan failed:', err.message));
 }
 
-async function scanPayments(bot) {
+export async function scanPayments(bot) {
   if (paymentScanRunning) return;
   paymentScanRunning = true;
   try {
