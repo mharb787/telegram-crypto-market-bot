@@ -223,6 +223,7 @@ export function buildAlertKey(userId, watchAddress, interaction) {
   return [
     userId,
     watchAddress,
+    interaction.alertType ?? 'confirmed',
     interaction.txid ?? interaction.date ?? interaction.timestamp ?? 'unknown',
     interaction.counterparty ?? interaction.blacklistedAddress ?? 'counterparty',
   ].join(':');
@@ -240,6 +241,7 @@ export function createOrGetAlert(db, { userId, chatId, watchAddress, interaction
     userId,
     chatId,
     watchAddress,
+    alertType: interaction.alertType ?? 'confirmed',
     counterparty: interaction.counterparty ?? interaction.blacklistedAddress ?? null,
     amount: interaction.amount ?? null,
     token: interaction.token ?? 'USDT',

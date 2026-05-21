@@ -99,6 +99,7 @@ export async function checkOnChain(address, options = {}) {
     tetherCounterpartyVerification: shouldAuditCounterparties,
     externalCounterpartyAudit: shouldAuditCounterparties,
     checkedCounterparties: counterparties.length,
+    reviewedInteractions:  auditTransfers.map(tx => buildInteraction(address, tx)).filter(Boolean),
     bannedCounterparties: blacklistAudit.bannedCounterparties,
     blacklistedInteractions: blacklistAudit.interactions,
     unknownCounterparties: blacklistAudit.unknownCounterparties,

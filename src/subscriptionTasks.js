@@ -1,5 +1,6 @@
 import { getRecentUSDTTransfers } from './api/trongrid.js';
 import { checkOnChain } from './validator/onchain.js';
+import { getLocalRiskForAddress, loadRiskDb } from './crawler/riskDb.js';
 import {
   activateSubscription,
   createOrGetAlert,
@@ -17,7 +18,8 @@ const PAYMENT_SCAN_MS = Math.max(30_000, Number(process.env.PAYMENT_SCAN_MS) || 
 const WATCH_SCAN_MS = Math.max(60_000, Number(process.env.WATCH_SCAN_MS) || 60 * 60_000);
 const ALERT_SCAN_MS = Math.max(60_000, Number(process.env.ALERT_SCAN_MS) || 5 * 60_000);
 const REMINDER_SCAN_MS = Math.max(60_000, Number(process.env.REMINDER_SCAN_MS) || 60 * 60_000);
-const WATCH_REVIEW_LIMIT = Math.max(200, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 1000);
+const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 500);
+const WATCH_MIN_USDT = Math.max(0, Number(process.env.WATCH_MIN_USDT) || 1000);
 
 let paymentScanRunning = false;
 let watchScanRunning = false;
@@ -91,7 +93,7 @@ export async function scanSingleWatchedWallet(db, user, watch) {
   try {
     const onchain = await checkOnChain(watch.address, {
       maxReviewedTransfers: WATCH_REVIEW_LIMIT,
-      minAuditUsdt: 0,
+      minAuditUsdt: WATCH_MIN_USDT,
       forceCounterpartyAudit: true,
     });
     watch.lastCheckedAt = new Date().toISOString();
@@ -100,7 +102,11 @@ export async function scanSingleWatchedWallet(db, user, watch) {
     watch.lastError = null;
 
     let changed = true;
-    const currentInteractions = onchain.blacklistedInteractions ?? [];
+    const confirmedInteractions = (onchain.blacklistedInteractions ?? [])
+      .map(item => ({ ...item, alertType: 'confirmed' }));
+    const indirectInteractions = await findIndirectRiskInteractions(onchain, confirmedInteractions);
+    const currentInteractions = [...confirmedInteractions, ...indirectInteractions];
+
     for (const interaction of currentInteractions) {
       const result = createOrGetAlert(db, {
         userId: user.userId,
@@ -124,6 +130,37 @@ export async function scanSingleWatchedWallet(db, user, watch) {
     logger.warn(`Watched wallet scan failed ${watch.address}: ${err.message}`);
     return { changed: true, error: err };
   }
+}
+
+async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
+  const reviewed = onchain.reviewedInteractions ?? [];
+  if (reviewed.length === 0) return [];
+
+  const confirmedKeys = new Set(confirmedInteractions.map(item => interactionKey(item)));
+  const riskDb = await loadRiskDb();
+  const indirect = [];
+
+  for (const interaction of reviewed) {
+    if (!interaction.counterparty) continue;
+    if (confirmedKeys.has(interactionKey(interaction))) continue;
+
+    const risk = getLocalRiskForAddress(riskDb, interaction.counterparty);
+    const count = risk.blacklistedEdges?.length ?? 0;
+    const isDirectlyBlacklisted = risk.addressInfo?.isBlacklisted === true;
+    if (count === 0 || isDirectlyBlacklisted) continue;
+
+    indirect.push({
+      ...interaction,
+      alertType: 'indirect',
+      indirectRiskCount: count,
+    });
+  }
+
+  return indirect;
+}
+
+function interactionKey(interaction) {
+  return `${interaction.txid ?? interaction.timestamp ?? interaction.date}:${interaction.counterparty}`;
 }
 
 async function sendDueAlerts(bot) {
@@ -211,10 +248,26 @@ function normalizeTransfer(tx) {
 function riskAlertText(alert) {
   const amount = alert.amount == null ? 'غير معروف' : `${Number(alert.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${alert.token ?? 'USDT'}`;
   const time = alert.timestamp ? shortDate(alert.timestamp) : (alert.date ?? 'وقت غير معروف');
+  if (alert.alertType === 'indirect') {
+    return [
+      '⚠️ تنبيه خطر غير مباشر',
+      '',
+      'تم رصد تعامل USDT مع عنوان عالي الخطورة.',
+      'العنوان المقابل غير مؤكد الحظر حاليا، لكنه مرتبط بتعاملات سابقة مع القائمة السوداء.',
+      '',
+      `المحفظة: ${alert.watchAddress}`,
+      `العنوان عالي الخطورة: ${alert.counterparty ?? 'غير معروف'}`,
+      `المبلغ: ${amount}`,
+      `الوقت: ${time}`,
+      '',
+      'سيستمر البوت بمتابعة المحفظة وإبلاغك عند ظهور أي مخاطر جديدة.',
+    ].join('\n');
+  }
+
   return [
-    '🚨 تحذير مخاطر عاجل',
+    '🚨 خطر مؤكد',
     '',
-    'تم رصد تعامل USDT مرتبط بالقائمة السوداء على محفظة تتابعها.',
+    'تم رصد تعامل USDT مع عنوان محظور من Tether على محفظة تتابعها.',
     '',
     `المحفظة: ${alert.watchAddress}`,
     `العنوان المحظور: ${alert.counterparty ?? 'غير معروف'}`,

@@ -505,10 +505,13 @@ function immediateWatchScanText(scan) {
   }
 
   if (scan.alertsCreated > 0) {
+    const indirect = (scan.interactions ?? []).filter(item => item.alertType === 'indirect').length;
+    const confirmed = scan.alertsCreated - indirect;
     return [
-      '🚨 تمت إضافة المحفظة وتم رصد تعامل USDT مؤكد مع عنوان محظور.',
+      '🚨 تمت إضافة المحفظة وتم رصد تعاملات خطرة ضمن الفحص الحالي.',
       '',
-      `عدد الأحداث: ${scan.alertsCreated}`,
+      `خطر مؤكد: ${confirmed}`,
+      `خطر غير مباشر: ${indirect}`,
       'سيتم إرسال تنبيه المخاطر ومتابعته تلقائيا.',
     ].join('\n');
   }
