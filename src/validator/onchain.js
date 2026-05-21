@@ -204,7 +204,6 @@ async function filterUntrustedCounterparties(counterparties) {
   const filtered = [];
   for (const address of counterparties) {
     if (await getTrustedEntity(address)) continue;
-    if (await ensureTrustedLargeUsdtHolder(address)) continue;
     filtered.push(address);
   }
   return filtered;

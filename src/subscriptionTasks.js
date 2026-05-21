@@ -1,7 +1,7 @@
 import { getRecentUSDTTransfers } from './api/trongrid.js';
 import { checkOnChain } from './validator/onchain.js';
 import { getLocalRiskForAddress, loadRiskDb } from './crawler/riskDb.js';
-import { ensureTrustedLargeUsdtHolder, getTrustedEntity } from './trustedEntities.js';
+import { getTrustedEntity } from './trustedEntities.js';
 import {
   activateSubscription,
   createOrGetAlert,
@@ -157,7 +157,6 @@ async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
     if (!interaction.counterparty) continue;
     if (confirmedKeys.has(interactionKey(interaction))) continue;
     if (await getTrustedEntity(interaction.counterparty)) continue;
-    if (await ensureTrustedLargeUsdtHolder(interaction.counterparty)) continue;
 
     const risk = getLocalRiskForAddress(riskDb, interaction.counterparty);
     const count = risk.blacklistedEdges?.length ?? 0;
