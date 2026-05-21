@@ -533,9 +533,24 @@ function walletMessageText(watch) {
     '',
     watch.address,
     `آخر فحص: ${shortDate(watch.lastCheckedAt)}`,
-    `الحالة: ${watch.lastStatus ?? '-'}`,
-    watch.lastRisk ? `المخاطر: ${watch.lastRisk}` : null,
+    `الحالة: ${watchStatusLabel(watch.lastStatus)}`,
+    watch.lastRisk ? `المخاطر: ${riskLabel(watch.lastRisk)}` : null,
   ].filter(Boolean).join('\n');
+}
+
+function watchStatusLabel(status) {
+  if (status === 'checked') return 'تم الفحص';
+  if (status === 'incomplete') return 'فحص غير مكتمل';
+  if (status === 'failed') return 'فشل الفحص';
+  return '-';
+}
+
+function riskLabel(risk) {
+  if (risk === 'blacklisted') return 'محظورة';
+  if (risk === 'high') return 'عالية';
+  if (risk === 'medium') return 'متوسطة';
+  if (risk === 'safe') return 'منخفضة';
+  return risk ?? '-';
 }
 
 function walletMessageOptions(watch) {
