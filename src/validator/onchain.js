@@ -2,7 +2,6 @@ import {
   getAccount,
   getFirstTransaction,
   getRecentUSDTTransfers,
-  getTronScanAccount,
   isBlacklistedByTether,
   USDT_CONTRACT,
 } from '../api/trongrid.js';
@@ -15,7 +14,7 @@ import {
   saveRiskDb,
   upsertAddress,
 } from '../crawler/riskDb.js';
-import { getTrustedEntity, upsertTrustedEntity } from '../trustedEntities.js';
+import { ensureTrustedLargeUsdtHolder, getTrustedEntity } from '../trustedEntities.js';
 import { logger } from '../utils/logger.js';
 
 const SUN = 1_000_000;   // 1 TRX  = 1,000,000 sun
@@ -24,8 +23,6 @@ const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_
 const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 3);
 const VERIFY_COUNTERPARTIES_WITH_TETHER = process.env.VERIFY_COUNTERPARTIES_WITH_TETHER === 'true';
 const MIN_USER_AUDIT_USDT = Math.max(0, Number(process.env.MIN_USER_AUDIT_USDT) || 2000);
-const PLATFORM_AUTO_TX_COUNT = Math.max(1000, Number(process.env.PLATFORM_AUTO_TX_COUNT) || 10000);
-const PLATFORM_AUTO_USDT_BALANCE = Math.max(100000, Number(process.env.PLATFORM_AUTO_USDT_BALANCE) || 5000000);
 
 /**
  * Runs all on-chain checks for a TRC20 address.
@@ -63,11 +60,8 @@ export async function checkOnChain(address, options = {}) {
   const trxBalance  = acc ? (acc.balance ?? 0) / SUN : 0;
   const usdtEntry   = acc?.trc20?.find(t => t[USDT_CONTRACT]);
   const usdtBalance = usdtEntry ? Number(usdtEntry[USDT_CONTRACT]) / MU : 0;
-  const platformCandidate = !trustedEntity && isBanned !== true
-    ? await detectPlatformCandidate(address, usdtBalance)
-    : null;
-  if (platformCandidate) {
-    trustedEntity = await upsertTrustedEntity(address, platformCandidate);
+  if (!trustedEntity && isBanned !== true) {
+    trustedEntity = await ensureTrustedLargeUsdtHolder(address, usdtBalance);
   }
 
   // ── Wallet age ───────────────────────────────────────────────────────────
@@ -210,6 +204,7 @@ async function filterUntrustedCounterparties(counterparties) {
   const filtered = [];
   for (const address of counterparties) {
     if (await getTrustedEntity(address)) continue;
+    if (await ensureTrustedLargeUsdtHolder(address)) continue;
     filtered.push(address);
   }
   return filtered;
@@ -305,41 +300,6 @@ async function persistRiskFindings(address, isBanned, interactions) {
   }
 
   if (changed) await saveRiskDb(db);
-}
-
-async function detectPlatformCandidate(address, usdtBalance) {
-  if (usdtBalance < PLATFORM_AUTO_USDT_BALANCE) return null;
-
-  const account = await settle(() => getTronScanAccount(address));
-  if (account.status !== 'fulfilled') return null;
-
-  const txCount = extractTransactionCount(account.value);
-  if (txCount < PLATFORM_AUTO_TX_COUNT) return null;
-
-  return {
-    name: 'منصة محتملة',
-    type: 'platform',
-    source: 'auto_activity_balance',
-    reason: `tx_count:${txCount};usdt_balance:${Math.floor(usdtBalance)}`,
-    auto: true,
-  };
-}
-
-function extractTransactionCount(data) {
-  const candidates = [
-    data?.transactions,
-    data?.totalTransactionCount,
-    data?.totalTransaction,
-    data?.transactionCount,
-    data?.transactionsCount,
-    data?.txCount,
-    data?.total,
-  ];
-  for (const value of candidates) {
-    const number = Number(value);
-    if (Number.isFinite(number) && number >= 0) return number;
-  }
-  return 0;
 }
 
 function computeRisk({ isBanned, ageInfo, bannedCounterparties, oklink, local, trustedEntity }) {
