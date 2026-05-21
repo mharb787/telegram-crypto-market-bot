@@ -133,6 +133,26 @@ export async function handleCallback(bot, query) {
     return;
   }
 
+  if (data.startsWith('watch_result:')) {
+    const address = data.slice('watch_result:'.length);
+    await bot.answerCallbackQuery(query.id, { text: 'جاري إضافة المحفظة...' });
+    if (!isSubscribed(user)) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(msg.chat.id, paywallText(user), subscribeNowOptions());
+      return;
+    }
+
+    const formatResult = validateTRC20(address);
+    if (!formatResult.valid) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(msg.chat.id, invalidAddressMessage(address, formatResult.reason), { parse_mode: 'Markdown', ...mainKeyboard });
+      return;
+    }
+
+    await addWatchAndScan(bot, msg.chat.id, db, user, address);
+    return;
+  }
+
   if (data.startsWith('watch_edit:')) {
     const id = data.slice('watch_edit:'.length);
     const watch = user.watches?.find(item => item.id === id);
@@ -244,7 +264,7 @@ async function handleWalletCheck(bot, msg, db, user, text) {
 
     const report = onChainReport(text, fmt, onchain);
     await deleteMessageQuietly(bot, chatId, loading.message_id);
-    await bot.sendMessage(chatId, report, { parse_mode: 'Markdown', ...mainKeyboard });
+    await bot.sendMessage(chatId, report, resultWatchOptions(text));
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
     await saveSubscriptions(db);
@@ -325,7 +345,11 @@ async function handleAddWatch(bot, msg, db, user, text) {
     return;
   }
 
-  const result = addWatch(user, text);
+  await addWatchAndScan(bot, chatId, db, user, text);
+}
+
+async function addWatchAndScan(bot, chatId, db, user, address) {
+  const result = addWatch(user, address);
   await saveSubscriptions(db);
   if (!result.ok) {
     await bot.sendMessage(chatId, watchResultText(result), { ...mainKeyboard });
@@ -487,6 +511,17 @@ function watchedWalletsOptions(user) {
   return {
     reply_markup: {
       inline_keyboard: rows,
+    },
+  };
+}
+
+function resultWatchOptions(address) {
+  return {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'إضافة هذا العنوان للمتابعة', callback_data: `watch_result:${address}` },
+      ]],
     },
   };
 }
