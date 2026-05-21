@@ -227,6 +227,10 @@ async function checkBlacklistTronScan(address) {
   }
 }
 
+export async function getTronScanAccount(address) {
+  return fetchJSON(`${TRONSCAN_URL}/api/account?address=${address}&includeToken=true`);
+}
+
 /**
  * Main export: tries RPC first, falls back to TronScan.
  * Returns true | false | null.

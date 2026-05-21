@@ -23,7 +23,8 @@ export function loadingMessage(address) {
 export function onChainReport(address, fmtNumber, onchain) {
   const localCount = onchain.localRisk?.blacklistedInteractionCount ?? 0;
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
-  const blacklistTxCount = Math.max(localCount, directCount);
+  const trusted = onchain.blacklisted === true ? null : onchain.trustedEntity;
+  const blacklistTxCount = trusted ? directCount : Math.max(localCount, directCount);
   const events = collectRiskEvents(address, onchain).slice(0, 5);
   const ageDays = onchain.age?.days;
   const avgTxsPerDay = ageDays > 0 ? (onchain.totalTransactions ?? 0) / ageDays : 0;
@@ -68,6 +69,7 @@ export function invalidAddressMessage(address, reason) {
 function walletType(onchain, blacklistTxCount) {
   if (onchain.apiError) return 'فحص غير مكتمل';
   if (onchain.blacklisted === true) return 'عنوان محظور';
+  if (onchain.trustedEntity) return `عنوان منصة موثوق: ${onchain.trustedEntity.name ?? 'منصة'}`;
   if (blacklistTxCount > 0) return 'غير محظور لكنه تعامل مع القائمة السوداء';
   if (onchain.blacklisted === null) return 'تعذر التحقق منه';
   if ((onchain.totalTransactions ?? 0) === 0) return 'لا توجد معاملات USDT ضمن الفحص الحالي';
@@ -97,6 +99,9 @@ function connectionSummary(blacklistTxCount) {
 }
 
 function usdtScopeNote(onchain, blacklistTxCount) {
+  if (onchain.blacklisted !== true && onchain.trustedEntity) {
+    return 'ℹ️ *ملاحظة:* هذا العنوان مصنف كمنصة/جهة موثوقة، لذلك يتم تجاهل مخاطر الارتباط غير المباشر.';
+  }
   if (onchain.apiError) {
     return '⚠️ *تنبيه:* تعذر إكمال الفحص الخارجي، لذلك لا يمكن الجزم بالنتيجة النهائية';
   }
@@ -118,7 +123,7 @@ function collectRiskEvents(address, onchain) {
     counterparty: item.counterparty,
   }));
 
-  const local = (onchain.localRisk?.blacklistedInteractions ?? []).map(item => ({
+  const local = (onchain.trustedEntity ? [] : (onchain.localRisk?.blacklistedInteractions ?? [])).map(item => ({
     timestamp: item.timestamp ?? parseDate(item.date),
     date: item.date,
     amount: item.amount,

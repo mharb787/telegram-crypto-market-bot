@@ -13,6 +13,7 @@ import {
 import { checkBlacklistConstantContract, isBlacklistedByTether } from './api/trongrid.js';
 import { loadUsageLog } from './usageLog.js';
 import { loadSubscriptions } from './subscriptions.js';
+import { listTrustedEntities, removeTrustedEntity, upsertTrustedEntity } from './trustedEntities.js';
 import { logger } from './utils/logger.js';
 
 const token = process.env.ADMIN_BOT_TOKEN;
@@ -45,6 +46,7 @@ const adminKeyboard = {
       [{ text: '/subs' }, { text: '/users' }],
       [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
+      [{ text: '/trusted' }],
       [{ text: '/export_users' }],
       [{ text: '/broadcast' }],
       [{ text: '/check_unbanned' }, { text: '/help' }],
@@ -63,6 +65,9 @@ await bot.setMyCommands([
   { command: 'pending', description: 'العناوين المنتظرة' },
   { command: 'blocked', description: 'آخر العناوين المحظورة' },
   { command: 'export_blocked', description: 'تصدير كل المحظور' },
+  { command: 'trusted', description: 'العناوين الموثوقة/المنصات' },
+  { command: 'trust', description: 'إضافة عنوان منصة موثوق' },
+  { command: 'untrust', description: 'حذف عنوان من الموثوقة' },
   { command: 'users', description: 'قائمة المستخدمين' },
   { command: 'user', description: 'تفاصيل مستخدم' },
   { command: 'addr', description: 'من بحث عن عنوان' },
@@ -155,6 +160,53 @@ bot.onText(/^\/export_blocked/, async (msg) => {
   const file = await writeTempFile('blocked-addresses.txt', blocked.map(item => item.address).join('\n') + '\n');
   await bot.sendDocument(msg.chat.id, file, adminKeyboard, { filename: 'blocked-addresses.txt', contentType: 'text/plain' });
   await fs.rm(file, { force: true });
+});
+
+bot.onText(/^\/trusted(?:@\w+)?(?:\s|$)/, async (msg) => {
+  if (!isAllowed(msg)) return;
+  const items = await listTrustedEntities();
+  await bot.sendMessage(msg.chat.id, formatTrustedList(items), adminHtml);
+});
+
+bot.onText(/^\/trust(?:@\w+)?(?:\s+(\S+)(?:\s+([\s\S]+))?)?$/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const address = match?.[1]?.trim();
+  const name = match?.[2]?.trim() || 'منصة موثوقة';
+  if (!address) {
+    await bot.sendMessage(msg.chat.id, 'استخدم:\n<code>/trust T... Binance</code>', adminHtml);
+    return;
+  }
+
+  const validation = validateTRC20(address);
+  if (!validation.valid) {
+    await bot.sendMessage(msg.chat.id, `العنوان غير صالح:\n<code>${escapeHtml(address)}</code>`, adminHtml);
+    return;
+  }
+
+  const entity = await upsertTrustedEntity(address, {
+    name,
+    type: 'platform',
+    source: 'admin',
+    reason: `admin:${msg.from?.id ?? msg.chat.id}`,
+    auto: false,
+  });
+  await bot.sendMessage(msg.chat.id, formatTrustedSaved(entity), adminHtml);
+});
+
+bot.onText(/^\/untrust(?:@\w+)?(?:\s+(\S+))?$/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const address = match?.[1]?.trim();
+  if (!address) {
+    await bot.sendMessage(msg.chat.id, 'استخدم:\n<code>/untrust T...</code>', adminHtml);
+    return;
+  }
+
+  const removed = await removeTrustedEntity(address);
+  await bot.sendMessage(
+    msg.chat.id,
+    removed ? `تم حذف العنوان من قائمة المنصات الموثوقة:\n<code>${escapeHtml(address)}</code>` : `العنوان غير موجود في القائمة:\n<code>${escapeHtml(address)}</code>`,
+    adminHtml
+  );
 });
 
 bot.onText(/^\/users/, async (msg) => {
@@ -579,6 +631,42 @@ function formatBlockedList(items) {
   ].join('\n');
 }
 
+function formatTrustedList(items) {
+  if (items.length === 0) {
+    return [
+      '<b>العناوين الموثوقة/المنصات</b>',
+      '',
+      'لا يوجد عناوين موثوقة حتى الآن.',
+      '',
+      'للإضافة:',
+      '<code>/trust T... Binance</code>',
+    ].join('\n');
+  }
+
+  return [
+    '<b>العناوين الموثوقة/المنصات</b>',
+    '',
+    ...items.slice(0, 30).map((item, index) => [
+      `${index + 1}. <code>${escapeHtml(item.address)}</code>`,
+      `الاسم: ${escapeHtml(item.name ?? '-')}`,
+      `المصدر: ${escapeHtml(item.source ?? '-')}${item.auto ? ' | تلقائي' : ''}`,
+      `آخر تحديث: <code>${shortDate(item.lastSeen)}</code>`,
+    ].join('\n')),
+    items.length > 30 ? `\n... و ${items.length - 30} عنوان آخر` : null,
+  ].filter(Boolean).join('\n\n');
+}
+
+function formatTrustedSaved(entity) {
+  return [
+    '<b>تم حفظ العنوان كمنصة/جهة موثوقة</b>',
+    '',
+    `<code>${escapeHtml(entity.address)}</code>`,
+    `الاسم: ${escapeHtml(entity.name ?? '-')}`,
+    '',
+    'سيتم استثناؤه من مخاطر الارتباط غير المباشر ومن إضافته لمحافظ المتابعة.',
+  ].join('\n');
+}
+
 function formatUsersList(users) {
   if (users.length === 0) return '<b>سجل المستخدمين</b>\n\nلا يوجد استخدام مسجل بعد.';
   return [
@@ -938,6 +1026,9 @@ function helpText() {
     '<code>/pending</code> العناوين المنتظرة',
     '<code>/blocked</code> آخر العناوين المحظورة',
     '<code>/export_blocked</code> تصدير كل المحظور كملف',
+    '<code>/trusted</code> عرض عناوين المنصات الموثوقة',
+    '<code>/trust T... NAME</code> إضافة عنوان منصة موثوق',
+    '<code>/untrust T...</code> حذف عنوان من الموثوقة',
     '<code>/users</code> قائمة المستخدمين',
     '<code>/user USER_ID</code> تفاصيل مستخدم وعناوينه',
     '<code>/addr T...</code> من بحث عن عنوان معين',

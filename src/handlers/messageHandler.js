@@ -37,6 +37,7 @@ import {
   watchLimit,
 } from '../subscriptions.js';
 import { scanPayments, scanSingleWatchedWallet } from '../subscriptionTasks.js';
+import { getTrustedEntity } from '../trustedEntities.js';
 
 export async function handleMessage(bot, msg) {
   const chatId = msg.chat.id;
@@ -366,6 +367,14 @@ async function handleAddWatch(bot, msg, db, user, text) {
 }
 
 async function addWatchAndScan(bot, chatId, db, user, address) {
+  const trusted = await getTrustedEntity(address);
+  if (trusted) {
+    user.state = null;
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, trustedWatchRefusalText(trusted), { ...mainKeyboard });
+    return;
+  }
+
   const result = addWatch(user, address);
   await saveSubscriptions(db);
   if (!result.ok) {
@@ -384,6 +393,13 @@ async function addWatchAndScan(bot, chatId, db, user, address) {
   }
 
   const scan = await scanSingleWatchedWallet(freshDb, freshUser, freshWatch);
+  if (scan.skippedTrusted) {
+    removeWatch(freshUser, freshWatch.id);
+    await saveSubscriptions(freshDb);
+    await deleteMessageQuietly(bot, chatId, waiting.message_id);
+    await bot.sendMessage(chatId, trustedWatchRefusalText(scan.onchain?.trustedEntity ?? { name: 'منصة' }), { ...mainKeyboard });
+    return;
+  }
   await saveSubscriptions(freshDb);
   await deleteMessageQuietly(bot, chatId, waiting.message_id);
   await bot.sendMessage(chatId, immediateWatchScanText(scan), walletMessageOptions(freshWatch));
@@ -394,6 +410,14 @@ async function handleEditWatch(bot, msg, db, user, text) {
   const formatResult = validateTRC20(text);
   if (!formatResult.valid) {
     await bot.sendMessage(chatId, 'العنوان غير صالح. أرسل عنوان TRON صحيح للتعديل.', { ...mainKeyboard });
+    return;
+  }
+
+  const trusted = await getTrustedEntity(text);
+  if (trusted) {
+    user.state = null;
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, trustedWatchRefusalText(trusted), { ...mainKeyboard });
     return;
   }
 
@@ -582,6 +606,15 @@ function watchResultText(result) {
   if (result.reason === 'exists') return 'هذه المحفظة موجودة مسبقا في المتابعة.';
   if (result.reason === 'limit') return `وصلت للحد الأقصى: ${watchLimit()} محافظ.`;
   return 'تعذر تنفيذ العملية.';
+}
+
+function trustedWatchRefusalText(entity) {
+  return [
+    'لا يمكن إضافة هذا العنوان للمتابعة الفردية.',
+    '',
+    `العنوان مصنف كمنصة/جهة موثوقة: ${entity.name ?? 'منصة'}`,
+    'عناوين المنصات تتعامل مع عدد كبير جداً من المحافظ، لذلك يتم استثناؤها من تنبيهات المخاطر غير المباشرة.',
+  ].join('\n');
 }
 
 function immediateWatchScanText(scan) {

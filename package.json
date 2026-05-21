@@ -9,7 +9,7 @@
     "admin": "node src/adminBot.js",
     "crawl:blacklist": "node src/crawler/blacklistCrawler.js",
     "crawl:blacklist:once": "node src/crawler/blacklistCrawler.js --once",
-    "check": "node --check src/index.js && node --check src/bot.js && node --check src/adminBot.js && node --check src/usageLog.js && node --check src/subscriptions.js && node --check src/subscriptionTasks.js && node --check src/handlers/commandHandler.js && node --check src/handlers/messageHandler.js && node --check src/validator/trc20.js && node --check src/validator/checksum.js && node --check src/validator/onchain.js && node --check src/api/trongrid.js && node --check src/api/oklink.js && node --check src/crawler/riskDb.js && node --check src/crawler/blacklistCrawler.js && node --check src/utils/logger.js && node --check src/utils/formatter.js"
+    "check": "node --check src/index.js && node --check src/bot.js && node --check src/adminBot.js && node --check src/usageLog.js && node --check src/subscriptions.js && node --check src/subscriptionTasks.js && node --check src/trustedEntities.js && node --check src/handlers/commandHandler.js && node --check src/handlers/messageHandler.js && node --check src/validator/trc20.js && node --check src/validator/checksum.js && node --check src/validator/onchain.js && node --check src/api/trongrid.js && node --check src/api/oklink.js && node --check src/crawler/riskDb.js && node --check src/crawler/blacklistCrawler.js && node --check src/utils/logger.js && node --check src/utils/formatter.js"
   },
   "engines": {
     "node": ">=20"

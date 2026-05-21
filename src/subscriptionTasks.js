@@ -1,6 +1,7 @@
 import { getRecentUSDTTransfers } from './api/trongrid.js';
 import { checkOnChain } from './validator/onchain.js';
 import { getLocalRiskForAddress, loadRiskDb } from './crawler/riskDb.js';
+import { getTrustedEntity } from './trustedEntities.js';
 import {
   activateSubscription,
   createOrGetAlert,
@@ -91,6 +92,14 @@ async function scanWatchedWallets() {
 
 export async function scanSingleWatchedWallet(db, user, watch) {
   try {
+    if (await getTrustedEntity(watch.address)) {
+      watch.lastCheckedAt = new Date().toISOString();
+      watch.lastStatus = 'checked';
+      watch.lastRisk = 'safe';
+      watch.lastError = null;
+      return { changed: true, skippedTrusted: true, alertsCreated: 0, interactions: [] };
+    }
+
     const onchain = await checkOnChain(watch.address, {
       maxReviewedTransfers: WATCH_REVIEW_LIMIT,
       minAuditUsdt: WATCH_MIN_USDT,
@@ -100,6 +109,10 @@ export async function scanSingleWatchedWallet(db, user, watch) {
     watch.lastStatus = onchain.apiError ? 'incomplete' : 'checked';
     watch.lastRisk = onchain.risk ?? null;
     watch.lastError = null;
+
+    if (onchain.trustedEntity && onchain.blacklisted !== true) {
+      return { changed: true, skippedTrusted: true, onchain, alertsCreated: 0, interactions: [] };
+    }
 
     let changed = true;
     const confirmedInteractions = (onchain.blacklistedInteractions ?? [])
@@ -143,6 +156,7 @@ async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
   for (const interaction of reviewed) {
     if (!interaction.counterparty) continue;
     if (confirmedKeys.has(interactionKey(interaction))) continue;
+    if (await getTrustedEntity(interaction.counterparty)) continue;
 
     const risk = getLocalRiskForAddress(riskDb, interaction.counterparty);
     const count = risk.blacklistedEdges?.length ?? 0;
