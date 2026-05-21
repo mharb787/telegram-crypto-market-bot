@@ -170,18 +170,38 @@ async function sendDueAlerts(bot) {
     const db = await loadSubscriptions();
     const alerts = dueAlerts(db);
     if (alerts.length === 0) return;
-    for (const alert of alerts) {
-      await bot.sendMessage(alert.chatId, riskAlertText(alert), {
+    for (const group of groupDueAlerts(alerts)) {
+      await bot.sendMessage(group.chatId, riskAlertText(group), {
         reply_markup: {
-          inline_keyboard: [[{ text: 'كتم هذا التنبيه', callback_data: `mute_alert:${alert.id}` }]],
+          inline_keyboard: [[{ text: 'كتم هذا التنبيه', callback_data: `mute_alert:${group.id}` }]],
         },
-      }).catch(err => logger.warn(`Risk alert send failed ${alert.chatId}: ${err.message}`));
-      markAlertSent(alert);
+      }).catch(err => logger.warn(`Risk alert send failed ${group.chatId}: ${err.message}`));
+      for (const alert of group.alerts) markAlertSent(alert);
     }
     await saveSubscriptions(db);
   } finally {
     alertScanRunning = false;
   }
+}
+
+function groupDueAlerts(alerts) {
+  const groups = new Map();
+  for (const alert of alerts) {
+    const alertType = alert.alertType ?? 'confirmed';
+    const key = `${alert.userId}:${alert.watchAddress}:${alertType}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: `group:${alert.userId}:${alert.watchAddress}:${alertType}`,
+        userId: alert.userId,
+        chatId: alert.chatId,
+        watchAddress: alert.watchAddress,
+        alertType,
+        alerts: [],
+      });
+    }
+    groups.get(key).alerts.push(alert);
+  }
+  return [...groups.values()];
 }
 
 async function sendSubscriptionReminders(bot) {
@@ -245,20 +265,20 @@ function normalizeTransfer(tx) {
   };
 }
 
-function riskAlertText(alert) {
-  const amount = alert.amount == null ? 'غير معروف' : `${Number(alert.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${alert.token ?? 'USDT'}`;
-  const time = alert.timestamp ? shortDate(alert.timestamp) : (alert.date ?? 'وقت غير معروف');
-  if (alert.alertType === 'indirect') {
+function riskAlertText(group) {
+  const alerts = group.alerts ?? [group];
+  const alert = alerts[0];
+  const list = formatRiskAddressList(alerts);
+  if ((group.alertType ?? alert.alertType) === 'indirect') {
     return [
       '⚠️ تنبيه خطر غير مباشر',
       '',
-      'تم رصد تعامل USDT مع عنوان عالي الخطورة.',
-      'العنوان المقابل غير مؤكد الحظر حاليا، لكنه مرتبط بتعاملات سابقة مع القائمة السوداء.',
+      `تم رصد تعاملات USDT مع ${alerts.length} عنوان عالي الخطورة.`,
+      'هذه العناوين غير مؤكدة الحظر حاليا، لكنها مرتبطة بتعاملات سابقة مع القائمة السوداء.',
       '',
-      `المحفظة: ${alert.watchAddress}`,
-      `العنوان عالي الخطورة: ${alert.counterparty ?? 'غير معروف'}`,
-      `المبلغ: ${amount}`,
-      `الوقت: ${time}`,
+      `المحفظة: ${group.watchAddress ?? alert.watchAddress}`,
+      '',
+      list,
       '',
       'سيستمر البوت بمتابعة المحفظة وإبلاغك عند ظهور أي مخاطر جديدة.',
     ].join('\n');
@@ -267,15 +287,24 @@ function riskAlertText(alert) {
   return [
     '🚨 خطر مؤكد',
     '',
-    'تم رصد تعامل USDT مع عنوان محظور من Tether على محفظة تتابعها.',
+    `تم رصد تعاملات USDT مع ${alerts.length} عنوان محظور من Tether على محفظة تتابعها.`,
     '',
-    `المحفظة: ${alert.watchAddress}`,
-    `العنوان المحظور: ${alert.counterparty ?? 'غير معروف'}`,
-    `المبلغ: ${amount}`,
-    `الوقت: ${time}`,
+    `المحفظة: ${group.watchAddress ?? alert.watchAddress}`,
+    '',
+    list,
     '',
     `هذا التنبيه سيتكرر حتى 5 مرات كل نصف ساعة ما لم تضغط كتم.`,
   ].join('\n');
+}
+
+function formatRiskAddressList(alerts) {
+  const rows = alerts.slice(0, 10).map((alert, index) => {
+    const amount = alert.amount == null ? 'غير معروف' : `${Number(alert.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${alert.token ?? 'USDT'}`;
+    const time = alert.timestamp ? shortDate(alert.timestamp) : (alert.date ?? 'وقت غير معروف');
+    return `${index + 1}. ${alert.counterparty ?? 'غير معروف'}\n   المبلغ: ${amount} | الوقت: ${time}`;
+  });
+  if (alerts.length > 10) rows.push(`... و ${alerts.length - 10} عنوان آخر`);
+  return rows.join('\n');
 }
 
 function shortDate(value) {

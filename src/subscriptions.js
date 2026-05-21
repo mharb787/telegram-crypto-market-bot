@@ -274,6 +274,18 @@ export function markAlertSent(alert) {
 }
 
 export function muteAlert(db, id) {
+  if (id?.startsWith('group:')) {
+    const [, userId, watchAddress, alertType] = id.split(':');
+    let changed = false;
+    for (const alert of Object.values(db.alerts ?? {})) {
+      if (alert.userId !== userId || alert.watchAddress !== watchAddress || (alert.alertType ?? 'confirmed') !== alertType) continue;
+      alert.muted = true;
+      alert.mutedAt = new Date().toISOString();
+      changed = true;
+    }
+    return changed;
+  }
+
   const alert = db.alerts?.[id];
   if (!alert) return false;
   alert.muted = true;
