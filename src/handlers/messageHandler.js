@@ -89,7 +89,7 @@ export async function handleMessage(bot, msg) {
 
   if (text === MY_WALLETS_BUTTON) {
     await saveSubscriptions(db);
-    await bot.sendMessage(chatId, watchedWalletsText(user), watchedWalletsOptions(user));
+    await sendWatchedWallets(bot, chatId, user);
     return;
   }
 
@@ -129,7 +129,7 @@ export async function handleCallback(bot, query) {
     const removed = removeWatch(user, id);
     await saveSubscriptions(db);
     await bot.answerCallbackQuery(query.id, { text: removed ? 'تم حذف المحفظة' : 'لم يتم العثور على المحفظة' });
-    await bot.sendMessage(msg.chat.id, watchedWalletsText(user), watchedWalletsOptions(user));
+    await sendWatchedWallets(bot, msg.chat.id, user);
     return;
   }
 
@@ -164,6 +164,23 @@ export async function handleCallback(bot, query) {
     await saveSubscriptions(db);
     await bot.answerCallbackQuery(query.id, { text: 'أرسل العنوان الجديد' });
     await bot.sendMessage(msg.chat.id, `أرسل العنوان الجديد بدل:\n${watch.address}`, { ...mainKeyboard });
+    return;
+  }
+
+  if (data.startsWith('watch_scan:')) {
+    const id = data.slice('watch_scan:'.length);
+    const watch = user.watches?.find(item => item.id === id);
+    if (!watch) {
+      await bot.answerCallbackQuery(query.id, { text: 'لم يتم العثور على المحفظة' });
+      return;
+    }
+
+    await bot.answerCallbackQuery(query.id, { text: 'جاري الفحص الآن...' });
+    const waiting = await bot.sendMessage(msg.chat.id, 'جاري فحص المحفظة الآن...');
+    const scan = await scanSingleWatchedWallet(db, user, watch);
+    await saveSubscriptions(db);
+    await deleteMessageQuietly(bot, msg.chat.id, waiting.message_id);
+    await bot.sendMessage(msg.chat.id, immediateWatchScanText(scan), walletMessageOptions(watch));
     return;
   }
 
@@ -369,7 +386,7 @@ async function addWatchAndScan(bot, chatId, db, user, address) {
   const scan = await scanSingleWatchedWallet(freshDb, freshUser, freshWatch);
   await saveSubscriptions(freshDb);
   await deleteMessageQuietly(bot, chatId, waiting.message_id);
-  await bot.sendMessage(chatId, immediateWatchScanText(scan), watchedWalletsOptions(freshUser));
+  await bot.sendMessage(chatId, immediateWatchScanText(scan), walletMessageOptions(freshWatch));
 }
 
 async function handleEditWatch(bot, msg, db, user, text) {
@@ -382,7 +399,11 @@ async function handleEditWatch(bot, msg, db, user, text) {
 
   const result = replaceWatch(user, user.state.id, text);
   await saveSubscriptions(db);
-  await bot.sendMessage(chatId, result.ok ? 'تم تعديل المحفظة.' : watchResultText(result), watchedWalletsOptions(user));
+  if (result.ok) {
+    await bot.sendMessage(chatId, 'تم تعديل المحفظة.', walletMessageOptions(result.watch));
+    return;
+  }
+  await bot.sendMessage(chatId, watchResultText(result), { ...mainKeyboard });
 }
 
 function subscriptionOfferText() {
@@ -489,28 +510,42 @@ function accountText(user) {
   ].join('\n');
 }
 
-function watchedWalletsText(user) {
-  if (!isSubscribed(user)) return paywallText(user);
+async function sendWatchedWallets(bot, chatId, user) {
+  if (!isSubscribed(user)) {
+    await bot.sendMessage(chatId, paywallText(user), { ...mainKeyboard });
+    return;
+  }
   const watches = user.watches ?? [];
   if (watches.length === 0) {
-    return `📋 لا توجد محافظ متابعة بعد.\n\nاضغط "${WATCH_BUTTON}" لإضافة محفظة.`;
+    await bot.sendMessage(chatId, `📋 لا توجد محافظ متابعة بعد.\n\nاضغط "${WATCH_BUTTON}" لإضافة محفظة.`, { ...mainKeyboard });
+    return;
   }
-  return [
-    '📋 محافظي المتابعة',
-    '',
-    ...watches.map((item, index) => `${index + 1}. ${item.address}\nآخر فحص: ${shortDate(item.lastCheckedAt)}`),
-  ].join('\n\n');
+
+  await bot.sendMessage(chatId, `📋 محافظ المتابعة: ${watches.length}`, { ...mainKeyboard });
+  for (const watch of watches) {
+    await bot.sendMessage(chatId, walletMessageText(watch), walletMessageOptions(watch));
+  }
 }
 
-function watchedWalletsOptions(user) {
-  const rows = (user.watches ?? []).map((item, index) => ([
-    { text: `تعديل ${index + 1}`, callback_data: `watch_edit:${item.id}` },
-    { text: `حذف ${index + 1}`, callback_data: `watch_del:${item.id}` },
-  ]));
-  if (rows.length === 0) return { ...mainKeyboard };
+function walletMessageText(watch) {
+  return [
+    '🛡️ محفظة متابعة',
+    '',
+    watch.address,
+    `آخر فحص: ${shortDate(watch.lastCheckedAt)}`,
+    `الحالة: ${watch.lastStatus ?? '-'}`,
+    watch.lastRisk ? `المخاطر: ${watch.lastRisk}` : null,
+  ].filter(Boolean).join('\n');
+}
+
+function walletMessageOptions(watch) {
   return {
     reply_markup: {
-      inline_keyboard: rows,
+      inline_keyboard: [[
+        { text: 'حذف', callback_data: `watch_del:${watch.id}` },
+        { text: 'تعديل', callback_data: `watch_edit:${watch.id}` },
+        { text: 'فحص الآن', callback_data: `watch_scan:${watch.id}` },
+      ]],
     },
   };
 }
