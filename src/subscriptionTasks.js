@@ -4,6 +4,7 @@ import { getLocalRiskForAddress, loadRiskDb } from './crawler/riskDb.js';
 import { getTrustedEntity } from './trustedEntities.js';
 import {
   activateSubscription,
+  alertMuteGroupId,
   createOrGetAlert,
   dueAlerts,
   expireOldPayments,
@@ -21,6 +22,7 @@ const ALERT_SCAN_MS = Math.max(60_000, Number(process.env.ALERT_SCAN_MS) || 5 * 
 const REMINDER_SCAN_MS = Math.max(60_000, Number(process.env.REMINDER_SCAN_MS) || 60 * 60_000);
 const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 500);
 const WATCH_MIN_USDT = Math.max(0, Number(process.env.WATCH_MIN_USDT) || 1000);
+const WATCH_SCAN_DELAY_MS = Math.max(0, Number(process.env.WATCH_SCAN_DELAY_MS) || 120_000);
 
 let paymentScanRunning = false;
 let watchScanRunning = false;
@@ -76,15 +78,22 @@ async function scanWatchedWallets() {
   watchScanRunning = true;
   try {
     const db = await loadSubscriptions();
-    let changed = false;
+    const items = [];
     for (const user of Object.values(db.users ?? {})) {
       if (!isSubscribed(user)) continue;
       for (const watch of user.watches ?? []) {
-        const result = await scanSingleWatchedWallet(db, user, watch);
-        changed = changed || result.changed;
+        items.push({ user, watch });
       }
     }
-    if (changed) await saveSubscriptions(db);
+
+    for (let i = 0; i < items.length; i += 1) {
+      const { user, watch } = items[i];
+      const result = await scanSingleWatchedWallet(db, user, watch);
+      if (result.changed) await saveSubscriptions(db);
+      if (i + 1 < items.length && WATCH_SCAN_DELAY_MS > 0) {
+        await delay(WATCH_SCAN_DELAY_MS);
+      }
+    }
   } finally {
     watchScanRunning = false;
   }
@@ -185,11 +194,15 @@ async function sendDueAlerts(bot) {
     const alerts = dueAlerts(db);
     if (alerts.length === 0) return;
     for (const group of groupDueAlerts(alerts)) {
-      await bot.sendMessage(group.chatId, riskAlertText(group), {
+      const sent = await bot.sendMessage(group.chatId, riskAlertText(group), {
         reply_markup: {
-          inline_keyboard: [[{ text: 'كتم هذا التنبيه', callback_data: `mute_alert:${group.id}` }]],
+          inline_keyboard: [[{ text: 'كتم هذا التنبيه', callback_data: `mute_alert:${group.muteId}` }]],
         },
-      }).catch(err => logger.warn(`Risk alert send failed ${group.chatId}: ${err.message}`));
+      }).then(() => true).catch(err => {
+        logger.warn(`Risk alert send failed ${group.chatId}: ${err.message}`);
+        return false;
+      });
+      if (!sent) continue;
       for (const alert of group.alerts) markAlertSent(alert);
     }
     await saveSubscriptions(db);
@@ -206,6 +219,7 @@ function groupDueAlerts(alerts) {
     if (!groups.has(key)) {
       groups.set(key, {
         id: `group:${alert.userId}:${alert.watchAddress}:${alertType}`,
+        muteId: alertMuteGroupId(alert),
         userId: alert.userId,
         chatId: alert.chatId,
         watchAddress: alert.watchAddress,
@@ -326,4 +340,8 @@ function shortDate(value) {
   if (Number.isNaN(date.getTime())) return '-';
   const pad = number => String(number).padStart(2, '0');
   return `${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

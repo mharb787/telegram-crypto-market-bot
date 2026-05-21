@@ -274,6 +274,17 @@ export function markAlertSent(alert) {
 }
 
 export function muteAlert(db, id) {
+  if (id?.startsWith('g')) {
+    let changed = false;
+    for (const alert of Object.values(db.alerts ?? {})) {
+      if (alertMuteGroupId(alert) !== id) continue;
+      alert.muted = true;
+      alert.mutedAt = new Date().toISOString();
+      changed = true;
+    }
+    return changed;
+  }
+
   if (id?.startsWith('group:')) {
     const [, userId, watchAddress, alertType] = id.split(':');
     let changed = false;
@@ -291,6 +302,14 @@ export function muteAlert(db, id) {
   alert.muted = true;
   alert.mutedAt = new Date().toISOString();
   return true;
+}
+
+export function alertMuteGroupId(alert) {
+  return `g${shortHash([
+    alert.userId,
+    alert.watchAddress,
+    alert.alertType ?? 'confirmed',
+  ].join(':'))}`;
 }
 
 export function watchLimit() {
@@ -316,4 +335,13 @@ function weekKey(date) {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const week = Math.ceil((((d - yearStart) / 86_400_000) + 1) / 7);
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function shortHash(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
