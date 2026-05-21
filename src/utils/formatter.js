@@ -25,7 +25,7 @@ export function onChainReport(address, fmtNumber, onchain) {
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
   const trusted = onchain.blacklisted === true ? null : onchain.trustedEntity;
   const blacklistTxCount = trusted ? directCount : Math.max(localCount, directCount);
-  const events = collectRiskEvents(address, onchain).slice(0, 5);
+  const events = trusted ? [] : collectRiskEvents(address, onchain).slice(0, 5);
   const ageDays = onchain.age?.days;
   const avgTxsPerDay = ageDays > 0 ? (onchain.totalTransactions ?? 0) / ageDays : 0;
 
@@ -41,11 +41,11 @@ export function onChainReport(address, fmtNumber, onchain) {
     `*USDT:* $${fmtNumber(onchain.balance?.usdt ?? 0, 2)} — ${statusLabel(onchain)}`,
     '',
     '🔗 *الارتباطات*',
-    connectionSummary(blacklistTxCount),
+    connectionSummary(blacklistTxCount, trusted),
     usdtScopeNote(onchain, blacklistTxCount),
     '',
     '📜 *سجل الأحداث*',
-    ...formatEvents(events, fmtNumber),
+    ...formatEvents(events, fmtNumber, trusted),
     '',
     '📊 *تفاصيل المحفظة*',
     '⏱️ *السلوك:*',
@@ -69,7 +69,7 @@ export function invalidAddressMessage(address, reason) {
 function walletType(onchain, blacklistTxCount) {
   if (onchain.apiError) return 'فحص غير مكتمل';
   if (onchain.blacklisted === true) return 'عنوان محظور';
-  if (onchain.trustedEntity) return `عنوان منصة موثوق: ${onchain.trustedEntity.name ?? 'منصة'}`;
+  if (onchain.trustedEntity) return `منصة مركزية موثوقة: ${onchain.trustedEntity.name ?? 'منصة'}`;
   if (blacklistTxCount > 0) return 'غير محظور لكنه تعامل مع القائمة السوداء';
   if (onchain.blacklisted === null) return 'تعذر التحقق منه';
   if ((onchain.totalTransactions ?? 0) === 0) return 'لا توجد معاملات USDT ضمن الفحص الحالي';
@@ -89,7 +89,10 @@ function directBlacklistStatus(onchain) {
   return '⚠️ تعذر التحقق';
 }
 
-function connectionSummary(blacklistTxCount) {
+function connectionSummary(blacklistTxCount, trusted = null) {
+  if (trusted) {
+    return 'ℹ️ *تقييم الارتباطات:* غير مطبق على عناوين المنصات المركزية';
+  }
   if (blacklistTxCount === 0) {
     return '✅ *تعاملات USDT مع القائمة السوداء:* لم تظهر ضمن الفحص الحالي';
   }
@@ -100,7 +103,7 @@ function connectionSummary(blacklistTxCount) {
 
 function usdtScopeNote(onchain, blacklistTxCount) {
   if (onchain.blacklisted !== true && onchain.trustedEntity) {
-    return 'ℹ️ *ملاحظة:* هذا العنوان مصنف كمنصة/جهة موثوقة، لذلك يتم تجاهل مخاطر الارتباط غير المباشر.';
+    return 'ℹ️ *ملاحظة:* عناوين المنصات تجمع معاملات عدد كبير من المستخدمين، لذلك لا يتم استخدامها لتقييم مخاطر محفظة فردية.';
   }
   if (onchain.apiError) {
     return '⚠️ *تنبيه:* تعذر إكمال الفحص الخارجي، لذلك لا يمكن الجزم بالنتيجة النهائية';
@@ -142,7 +145,8 @@ function collectRiskEvents(address, onchain) {
     .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
 }
 
-function formatEvents(events, fmtNumber) {
+function formatEvents(events, fmtNumber, trusted = null) {
+  if (trusted) return ['غير مطبق على عناوين المنصات المركزية.'];
   if (events.length === 0) return ['لا توجد أحداث USDT مع عناوين محظورة ضمن البيانات الحالية.'];
   return events.map(item => {
     const date = item.timestamp ? formatUtcDate(item.timestamp) : (item.date ?? 'وقت غير معروف');
