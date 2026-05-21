@@ -555,7 +555,7 @@ function resultWatchOptions(address) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [[
-        { text: 'إضافة هذا العنوان للمتابعة', callback_data: `watch_result:${address}` },
+        { text: 'إضافة هذا العنوان للمتابعة وتنبيه المخاطر', callback_data: `watch_result:${address}` },
       ]],
     },
   };
