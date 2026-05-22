@@ -836,10 +836,9 @@ function summarizeSubscriptions(subs) {
   let free = 0;
   let watches = 0;
   let paidSearchesToday = 0;
-  let freeSearchesThisWeek = 0;
+  let freeSearchesToday = 0;
   let activeWatchesUsers = 0;
   const today = new Date().toISOString().slice(0, 10);
-  const week = currentWeekKey();
 
   for (const user of users) {
     const expiresAt = Date.parse(user.subscription?.expiresAt ?? '');
@@ -851,7 +850,7 @@ function summarizeSubscriptions(subs) {
     watches += userWatches;
     if (userWatches > 0) activeWatchesUsers += 1;
     if (user.usage?.paidDayKey === today) paidSearchesToday += Number(user.usage.paidDayCount ?? 0);
-    if (user.usage?.freeWeekKey === week) freeSearchesThisWeek += Number(user.usage.freeWeekCount ?? 0);
+    if (user.usage?.freeDayKey === today) freeSearchesToday += Number(user.usage.freeDayCount ?? 0);
   }
 
   const paid = payments.filter(item => item.status === 'paid');
@@ -863,7 +862,7 @@ function summarizeSubscriptions(subs) {
     watches,
     activeWatchesUsers,
     paidSearchesToday,
-    freeSearchesThisWeek,
+    freeSearchesToday,
     paidPayments: paid.length,
     pendingPayments: payments.filter(item => item.status === 'pending').length,
     canceledPayments: payments.filter(item => item.status === 'canceled').length,
@@ -905,7 +904,7 @@ function formatSubscriptionStats(subs) {
     '',
     '<b>الاستخدام</b>',
     `• فحوصات المشتركين اليوم: <b>${stats.paidSearchesToday}</b>`,
-    `• فحوصات المجاني هذا الأسبوع: <b>${stats.freeSearchesThisWeek}</b>`,
+    `• فحوصات المجاني اليوم: <b>${stats.freeSearchesToday}</b>`,
     `• محافظ متابعة: <b>${stats.watches}</b>`,
     `• مستخدمون لديهم متابعة: <b>${stats.activeWatchesUsers}</b>`,
     '',

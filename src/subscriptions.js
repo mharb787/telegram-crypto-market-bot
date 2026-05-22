@@ -1,7 +1,7 @@
 import { readJson, writeJson } from './storage.js';
 
 const FILE = 'subscriptions.json';
-const FREE_WEEKLY_LIMIT = Math.max(1, Number(process.env.FREE_WEEKLY_LIMIT) || 3);
+const FREE_DAILY_LIMIT = Math.max(1, Number(process.env.FREE_DAILY_LIMIT ?? process.env.FREE_WEEKLY_LIMIT) || 1);
 const PAID_DAILY_LIMIT = Math.max(1, Number(process.env.PAID_DAILY_LIMIT) || 50);
 const WATCH_LIMIT = Math.max(1, Number(process.env.PAID_WATCH_LIMIT) || 5);
 const SUBSCRIPTION_DAYS = Math.max(1, Number(process.env.SUBSCRIPTION_DAYS) || 30);
@@ -71,9 +71,9 @@ export function getSearchAllowance(user, now = new Date()) {
     return { plan: 'paid', limit: PAID_DAILY_LIMIT, used, remaining: Math.max(0, PAID_DAILY_LIMIT - used), period: 'يوميا' };
   }
 
-  const key = weekKey(now);
-  const used = user.usage?.freeWeekKey === key ? Number(user.usage.freeWeekCount ?? 0) : 0;
-  return { plan: 'free', limit: FREE_WEEKLY_LIMIT, used, remaining: Math.max(0, FREE_WEEKLY_LIMIT - used), period: 'أسبوعيا' };
+  const key = dayKey(now);
+  const used = user.usage?.freeDayKey === key ? Number(user.usage.freeDayCount ?? 0) : 0;
+  return { plan: 'free', limit: FREE_DAILY_LIMIT, used, remaining: Math.max(0, FREE_DAILY_LIMIT - used), period: 'يوميا' };
 }
 
 export function canSearch(user, now = new Date()) {
@@ -93,12 +93,12 @@ export function consumeSearch(user, now = new Date()) {
     return;
   }
 
-  const key = weekKey(now);
-  if (user.usage.freeWeekKey !== key) {
-    user.usage.freeWeekKey = key;
-    user.usage.freeWeekCount = 0;
+  const key = dayKey(now);
+  if (user.usage.freeDayKey !== key) {
+    user.usage.freeDayKey = key;
+    user.usage.freeDayCount = 0;
   }
-  user.usage.freeWeekCount = Number(user.usage.freeWeekCount ?? 0) + 1;
+  user.usage.freeDayCount = Number(user.usage.freeDayCount ?? 0) + 1;
 }
 
 export function createPayment(db, user, fromAddress) {

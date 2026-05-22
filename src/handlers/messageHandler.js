@@ -510,7 +510,7 @@ function paywallText(user) {
   return [
     '🔒 وصلت للحد المجاني.',
     '',
-    `المتاح للزائر: ${allowance.limit} عمليات فحص أسبوعيا.`,
+    `المتاح للزائر: ${allowance.limit} عملية فحص يوميا.`,
     `المستخدم حاليا: ${allowance.used}/${allowance.limit}`,
     '',
     `اشترك بـ ${subscriptionPrice()} USDT شهريا لتحصل على:`,
