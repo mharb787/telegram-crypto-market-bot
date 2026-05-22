@@ -195,6 +195,8 @@ async function sendDueAlerts(bot) {
     if (alerts.length === 0) return;
     for (const group of groupDueAlerts(alerts)) {
       const sent = await bot.sendMessage(group.chatId, riskAlertText(group), {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
         reply_markup: {
           inline_keyboard: [[{ text: 'كتم هذا التنبيه', callback_data: `mute_alert:${group.muteId}` }]],
         },
@@ -293,7 +295,7 @@ function normalizeTransfer(tx) {
   };
 }
 
-function riskAlertText(group) {
+function legacyRiskAlertText(group) {
   const alerts = group.alerts ?? [group];
   const alert = alerts[0];
   const list = formatRiskAddressList(alerts);
@@ -325,7 +327,7 @@ function riskAlertText(group) {
   ].join('\n');
 }
 
-function formatRiskAddressList(alerts) {
+function legacyFormatRiskAddressList(alerts) {
   const rows = alerts.slice(0, 10).map((alert, index) => {
     const amount = alert.amount == null ? 'غير معروف' : `${Number(alert.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${alert.token ?? 'USDT'}`;
     const time = alert.timestamp ? shortDate(alert.timestamp) : (alert.date ?? 'وقت غير معروف');
@@ -333,6 +335,80 @@ function formatRiskAddressList(alerts) {
   });
   if (alerts.length > 10) rows.push(`... و ${alerts.length - 10} عنوان آخر`);
   return rows.join('\n');
+}
+
+function riskAlertText(group) {
+  const alerts = group.alerts ?? [group];
+  const alert = alerts[0];
+  const list = formatRiskAddressList(alerts);
+  if ((group.alertType ?? alert.alertType) === 'indirect') {
+    return [
+      '⚠️ تنبيه خطر غير مباشر',
+      '',
+      `تم رصد ${alerts.length} معاملة USDT مع عناوين عالية الخطورة.`,
+      'هذه العناوين غير مؤكدة الحظر حالياً، لكنها مرتبطة بتعاملات سابقة مع القائمة السوداء.',
+      '',
+      `المحفظة: ${addressLink(group.watchAddress ?? alert.watchAddress)}`,
+      '',
+      list,
+      '',
+      'سيستمر البوت بمتابعة المحفظة وإبلاغك عند ظهور أي مخاطر جديدة.',
+    ].join('\n');
+  }
+
+  return [
+    '🚨 خطر مؤكد',
+    '',
+    `تم رصد ${alerts.length} معاملة USDT مع عناوين محظورة من Tether على محفظة تتابعها.`,
+    '',
+    `المحفظة: ${addressLink(group.watchAddress ?? alert.watchAddress)}`,
+    '',
+    list,
+    '',
+    'هذا التنبيه سيتكرر حتى 5 مرات كل نصف ساعة ما لم تضغط كتم.',
+  ].join('\n');
+}
+
+function formatRiskAddressList(alerts) {
+  const rows = alerts.slice(0, 5).map((alert, index) => {
+    const amount = alert.amount == null
+      ? 'غير معروف'
+      : `${Number(alert.amount).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${escapeHtml(alert.token ?? 'USDT')}`;
+    const time = alert.timestamp ? shortDate(alert.timestamp) : escapeHtml(alert.date ?? 'وقت غير معروف');
+    const tx = alert.txid ? ` | Tx: ${txLink(alert.txid)}` : '';
+    return `${index + 1}. ${addressLink(alert.counterparty)}\n   ${amount} | ${time}${tx}`;
+  });
+  if (alerts.length > 5) rows.push(`... و ${alerts.length - 5} معاملات أخرى`);
+  return rows.join('\n');
+}
+
+function addressLink(address) {
+  if (!address) return 'غير معروف';
+  const safe = escapeHtml(address);
+  return `<a href="https://tronscan.org/#/address/${safe}">${shortAddress(safe)}</a>`;
+}
+
+function txLink(txid) {
+  const safe = escapeHtml(txid);
+  return `<a href="https://tronscan.org/#/transaction/${safe}">${shortTxid(safe)}</a>`;
+}
+
+function shortAddress(address) {
+  if (!address || address.length <= 12) return escapeHtml(address ?? '');
+  return `${escapeHtml(address.slice(0, 5))}...${escapeHtml(address.slice(-5))}`;
+}
+
+function shortTxid(txid) {
+  if (!txid || txid.length <= 12) return escapeHtml(txid ?? '');
+  return `${escapeHtml(txid.slice(0, 6))}...${escapeHtml(txid.slice(-6))}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 function shortDate(value) {
