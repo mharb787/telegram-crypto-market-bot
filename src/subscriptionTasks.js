@@ -5,6 +5,7 @@ import { getTrustedEntity } from './trustedEntities.js';
 import {
   activateSubscription,
   alertMuteGroupId,
+  buildWatchRiskKey,
   createOrGetAlert,
   dueAlerts,
   expireOldPayments,
@@ -99,7 +100,7 @@ async function scanWatchedWallets() {
   }
 }
 
-export async function scanSingleWatchedWallet(db, user, watch) {
+export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
   try {
     if (await getTrustedEntity(watch.address)) {
       watch.lastCheckedAt = new Date().toISOString();
@@ -128,8 +129,27 @@ export async function scanSingleWatchedWallet(db, user, watch) {
       .map(item => ({ ...item, alertType: 'confirmed' }));
     const indirectInteractions = await findIndirectRiskInteractions(onchain, confirmedInteractions);
     const currentInteractions = [...confirmedInteractions, ...indirectInteractions];
+    watch.knownRiskKeys ??= [];
+    const knownRiskKeys = new Set(watch.knownRiskKeys);
 
-    for (const interaction of currentInteractions) {
+    if (options.initialScan) {
+      for (const interaction of currentInteractions) {
+        knownRiskKeys.add(buildWatchRiskKey(interaction));
+      }
+      watch.knownRiskKeys = [...knownRiskKeys].slice(-1000);
+      watch.initialRiskCheckedAt = new Date().toISOString();
+      return {
+        changed: true,
+        onchain,
+        initialScan: true,
+        alertsCreated: 0,
+        interactions: currentInteractions,
+      };
+    }
+
+    const newInteractions = currentInteractions.filter(interaction => !knownRiskKeys.has(buildWatchRiskKey(interaction)));
+
+    for (const interaction of newInteractions) {
       const result = createOrGetAlert(db, {
         userId: user.userId,
         chatId: user.chatId,
@@ -137,13 +157,16 @@ export async function scanSingleWatchedWallet(db, user, watch) {
         interaction,
       });
       changed = changed || result.created;
+      knownRiskKeys.add(buildWatchRiskKey(interaction));
     }
+    watch.knownRiskKeys = [...knownRiskKeys].slice(-1000);
 
     return {
       changed,
       onchain,
-      alertsCreated: currentInteractions.length,
-      interactions: currentInteractions,
+      alertsCreated: newInteractions.length,
+      interactions: newInteractions,
+      reviewedRiskInteractions: currentInteractions,
     };
   } catch (err) {
     watch.lastCheckedAt = new Date().toISOString();

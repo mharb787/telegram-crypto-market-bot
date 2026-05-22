@@ -392,7 +392,7 @@ async function addWatchAndScan(bot, chatId, db, user, address) {
     return;
   }
 
-  const scan = await scanSingleWatchedWallet(freshDb, freshUser, freshWatch);
+  const scan = await scanSingleWatchedWallet(freshDb, freshUser, freshWatch, { initialScan: true });
   if (scan.skippedTrusted) {
     removeWatch(freshUser, freshWatch.id);
     await saveSubscriptions(freshDb);
@@ -622,15 +622,17 @@ function immediateWatchScanText(scan) {
     return `تمت إضافة المحفظة، لكن تعذر إكمال الفحص الفوري الآن.\n\nالسبب: ${scan.error.message}\nسيعاد فحصها تلقائيا كل ساعة.`;
   }
 
-  if (scan.alertsCreated > 0) {
-    const indirect = (scan.interactions ?? []).filter(item => item.alertType === 'indirect').length;
-    const confirmed = scan.alertsCreated - indirect;
+  const foundRisks = scan.initialScan ? (scan.interactions ?? []) : [];
+  if (foundRisks.length > 0) {
+    const indirect = foundRisks.filter(item => item.alertType === 'indirect').length;
+    const confirmed = foundRisks.length - indirect;
     return [
       '🚨 تمت إضافة المحفظة وتم رصد تعاملات خطرة ضمن الفحص الحالي.',
       '',
       `خطر مؤكد: ${confirmed}`,
       `خطر غير مباشر: ${indirect}`,
-      'سيتم إرسال تنبيه المخاطر ومتابعته تلقائيا.',
+      'هذه نتيجة الفحص الأولي فقط.',
+      'التنبيهات القادمة ستكون على أي مخاطر جديدة تظهر بعد إضافة المحفظة.',
     ].join('\n');
   }
 

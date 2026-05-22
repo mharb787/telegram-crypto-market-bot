@@ -197,6 +197,7 @@ export function addWatch(user, address) {
     createdAt: now,
     updatedAt: now,
     lastCheckedAt: null,
+    knownRiskKeys: [],
   };
   user.watches.push(watch);
   user.state = null;
@@ -215,8 +216,21 @@ export function replaceWatch(user, id, address) {
   if ((user.watches ?? []).some(item => item.id !== id && item.address === address)) return { ok: false, reason: 'exists' };
   watch.address = address;
   watch.updatedAt = new Date().toISOString();
+  watch.knownRiskKeys = [];
+  watch.lastCheckedAt = null;
+  watch.lastStatus = null;
+  watch.lastRisk = null;
+  watch.lastError = null;
   user.state = null;
   return { ok: true, watch };
+}
+
+export function buildWatchRiskKey(interaction) {
+  return [
+    interaction.alertType ?? 'confirmed',
+    interaction.txid ?? interaction.date ?? interaction.timestamp ?? 'unknown',
+    interaction.counterparty ?? interaction.blacklistedAddress ?? 'counterparty',
+  ].join(':');
 }
 
 export function buildAlertKey(userId, watchAddress, interaction) {

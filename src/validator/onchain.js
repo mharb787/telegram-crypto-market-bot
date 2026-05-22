@@ -242,11 +242,17 @@ function getCounterparty(address, tx) {
 async function loadLocalRisk(address) {
   const db = await loadRiskDb();
   const risk = getLocalRiskForAddress(db, address);
+  const filteredEdges = [];
+  for (const edge of risk.blacklistedEdges) {
+    const riskyAddress = edge.blacklistedAddress ?? edge.counterparty ?? (edge.from === address ? edge.to : edge.from);
+    if (await getTrustedEntity(riskyAddress)) continue;
+    filteredEdges.push(edge);
+  }
   return {
-    known: Boolean(risk.addressInfo || risk.blacklistedEdges.length),
+    known: Boolean(risk.addressInfo || filteredEdges.length),
     isBlacklisted: risk.addressInfo?.isBlacklisted ?? null,
-    blacklistedInteractions: risk.blacklistedEdges.slice(0, 20),
-    blacklistedInteractionCount: risk.blacklistedEdges.length,
+    blacklistedInteractions: filteredEdges.slice(0, 20),
+    blacklistedInteractionCount: filteredEdges.length,
   };
 }
 
