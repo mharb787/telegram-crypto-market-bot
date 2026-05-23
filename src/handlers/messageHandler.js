@@ -200,6 +200,14 @@ export async function handleCallback(bot, query) {
     return;
   }
 
+  if (data === 'flow_cancel:subscription') {
+    user.state = null;
+    await saveSubscriptions(db);
+    await bot.answerCallbackQuery(query.id, { text: 'تم الإلغاء' });
+    await bot.sendMessage(msg.chat.id, 'تم إلغاء عملية الاشتراك. يمكنك البدء من جديد متى أردت.', { ...mainKeyboard });
+    return;
+  }
+
   if (data === 'subscribe_now') {
     if (isSubscribed(user)) {
       user.state = null;
@@ -220,7 +228,7 @@ export async function handleCallback(bot, query) {
     user.state = { type: 'payment_from_address' };
     await saveSubscriptions(db);
     await bot.answerCallbackQuery(query.id, { text: 'أرسل عنوان الدفع' });
-    await bot.sendMessage(msg.chat.id, 'أرسل عنوان TRC20 الذي سترسل منه الدفعة.', { ...mainKeyboard });
+    await bot.sendMessage(msg.chat.id, 'أرسل عنوان TRC20 الذي سترسل منه الدفعة.', cancelFlowOptions());
     return;
   }
 
@@ -317,7 +325,7 @@ async function handlePaymentAddress(bot, msg, db, user, text) {
 
   const formatResult = validateTRC20(text);
   if (!formatResult.valid) {
-    await bot.sendMessage(chatId, 'العنوان غير صالح. أرسل عنوان TRON للمحفظة التي ستدفع منها.', { ...mainKeyboard });
+    await bot.sendMessage(chatId, 'العنوان غير صالح. أرسل عنوان TRON للمحفظة التي ستدفع منها.', cancelFlowOptions());
     return;
   }
 
@@ -446,8 +454,19 @@ function subscriptionOfferText() {
 function subscribeNowOptions() {
   return {
     reply_markup: {
+      inline_keyboard: [
+        [{ text: 'اشترك الآن', callback_data: 'subscribe_now' }],
+        [{ text: 'إلغاء', callback_data: 'flow_cancel:subscription' }],
+      ],
+    },
+  };
+}
+
+function cancelFlowOptions() {
+  return {
+    reply_markup: {
       inline_keyboard: [[
-        { text: 'اشترك الآن', callback_data: 'subscribe_now' },
+        { text: 'إلغاء', callback_data: 'flow_cancel:subscription' },
       ]],
     },
   };
