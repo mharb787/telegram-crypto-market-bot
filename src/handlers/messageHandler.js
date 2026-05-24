@@ -571,13 +571,16 @@ async function sendWatchedWallets(bot, chatId, user) {
 }
 
 function walletMessageText(watch) {
+  const lastSuccessfulAt = watch.lastSuccessfulCheckedAt ?? (watch.lastStatus === 'checked' ? watch.lastCheckedAt : null);
+  const lastSuccessfulRisk = watch.lastSuccessfulRisk ?? (watch.lastStatus === 'checked' ? watch.lastRisk : null);
   return [
     '🛡️ محفظة متابعة',
     '',
     watch.address,
-    `آخر فحص: ${shortDate(watch.lastCheckedAt)}`,
+    `آخر فحص مكتمل: ${shortDate(lastSuccessfulAt)}`,
+    watch.lastStatus && watch.lastStatus !== 'checked' ? `آخر محاولة: ${shortDate(watch.lastCheckedAt)}` : null,
     `الحالة: ${watchStatusLabel(watch.lastStatus)}`,
-    watch.lastRisk ? `المخاطر: ${riskLabel(watch.lastRisk)}` : null,
+    lastSuccessfulRisk ? `المخاطر: ${riskLabel(lastSuccessfulRisk)}` : null,
   ].filter(Boolean).join('\n');
 }
 

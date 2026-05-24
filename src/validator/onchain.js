@@ -20,7 +20,7 @@ import { logger } from '../utils/logger.js';
 const SUN = 1_000_000;   // 1 TRX  = 1,000,000 sun
 const MU  = 1_000_000;   // 1 USDT = 1,000,000 micro-USDT
 const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_LIMIT) || 200);
-const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 3);
+const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 1);
 const VERIFY_COUNTERPARTIES_WITH_TETHER = process.env.VERIFY_COUNTERPARTIES_WITH_TETHER === 'true';
 const MIN_USER_AUDIT_USDT = Math.max(0, Number(process.env.MIN_USER_AUDIT_USDT) || 2000);
 
@@ -103,6 +103,7 @@ export async function checkOnChain(address, options = {}) {
     reviewedTransactions: txList.length,
     reviewLimit,
     transferHistoryIncomplete: Boolean(txList.incomplete),
+    transferHistoryStopReason: txList.stopReason ?? null,
     tetherCounterpartyVerification: shouldAuditCounterparties,
     externalCounterpartyAudit: shouldAuditCounterparties,
     checkedCounterparties: counterparties.length,
@@ -115,6 +116,11 @@ export async function checkOnChain(address, options = {}) {
     trustedEntity,
     risk,
     apiError:             account.status === 'rejected' || transfers.status === 'rejected' || Boolean(txList.incomplete),
+    apiErrorReason:       account.status === 'rejected'
+      ? (account.reason?.message ?? String(account.reason))
+      : transfers.status === 'rejected'
+        ? (transfers.reason?.message ?? String(transfers.reason))
+        : txList.stopReason ?? null,
   };
 }
 

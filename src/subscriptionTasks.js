@@ -21,7 +21,7 @@ const PAYMENT_SCAN_MS = Math.max(30_000, Number(process.env.PAYMENT_SCAN_MS) || 
 const WATCH_SCAN_MS = Math.max(60_000, Number(process.env.WATCH_SCAN_MS) || 60 * 60_000);
 const ALERT_SCAN_MS = Math.max(60_000, Number(process.env.ALERT_SCAN_MS) || 5 * 60_000);
 const REMINDER_SCAN_MS = Math.max(60_000, Number(process.env.REMINDER_SCAN_MS) || 60 * 60_000);
-const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 500);
+const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 400);
 const WATCH_MIN_USDT = Math.max(0, Number(process.env.WATCH_MIN_USDT) || 1000);
 const WATCH_SCAN_DELAY_MS = Math.max(0, Number(process.env.WATCH_SCAN_DELAY_MS) || 120_000);
 
@@ -102,11 +102,15 @@ async function scanWatchedWallets() {
 
 export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
   try {
+    const checkedAt = new Date().toISOString();
     if (await getTrustedEntity(watch.address)) {
-      watch.lastCheckedAt = new Date().toISOString();
+      watch.lastCheckedAt = checkedAt;
       watch.lastStatus = 'checked';
       watch.lastRisk = 'safe';
       watch.lastError = null;
+      watch.lastSuccessfulCheckedAt = checkedAt;
+      watch.lastSuccessfulRisk = 'safe';
+      watch.lastSuccessfulReviewedTransactions = 0;
       return { changed: true, skippedTrusted: true, alertsCreated: 0, interactions: [] };
     }
 
@@ -115,10 +119,15 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
       minAuditUsdt: WATCH_MIN_USDT,
       forceCounterpartyAudit: true,
     });
-    watch.lastCheckedAt = new Date().toISOString();
+    watch.lastCheckedAt = checkedAt;
     watch.lastStatus = onchain.apiError ? 'incomplete' : 'checked';
     watch.lastRisk = onchain.risk ?? null;
-    watch.lastError = null;
+    watch.lastError = onchain.apiError ? (onchain.apiErrorReason ?? 'incomplete scan') : null;
+    if (!onchain.apiError) {
+      watch.lastSuccessfulCheckedAt = checkedAt;
+      watch.lastSuccessfulRisk = onchain.risk ?? null;
+      watch.lastSuccessfulReviewedTransactions = onchain.reviewedTransactions ?? null;
+    }
 
     if (onchain.trustedEntity && onchain.blacklisted !== true) {
       return { changed: true, skippedTrusted: true, onchain, alertsCreated: 0, interactions: [] };
