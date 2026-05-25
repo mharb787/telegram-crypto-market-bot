@@ -43,7 +43,8 @@ const adminKeyboard = {
   reply_markup: {
     keyboard: [
       [{ text: '/status' }, { text: '/stats' }],
-      [{ text: '/subs' }, { text: '/users' }],
+      [{ text: '/subs' }, { text: '/watches' }],
+      [{ text: '/users' }],
       [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
       [{ text: '/trusted' }],
@@ -61,6 +62,7 @@ await bot.setMyCommands([
   { command: 'status', description: 'حالة القاعدة والطابور' },
   { command: 'stats', description: 'إحصائيات مختصرة كاملة' },
   { command: 'subs', description: 'إحصائيات الاشتراكات والمدفوعات' },
+  { command: 'watches', description: 'كل محافظ المتابعة وحالة فحصها' },
   { command: 'add', description: 'إضافة بذور' },
   { command: 'pending', description: 'العناوين المنتظرة' },
   { command: 'blocked', description: 'آخر العناوين المحظورة' },
@@ -103,6 +105,21 @@ bot.onText(/^\/subs/, async (msg) => {
   if (!isAllowed(msg)) return;
   const subs = await loadSubscriptions();
   await bot.sendMessage(msg.chat.id, formatSubscriptionStats(subs), adminHtml);
+});
+
+bot.onText(/^\/watches/, async (msg) => {
+  if (!isAllowed(msg)) return;
+  const subs = await loadSubscriptions();
+  const watches = collectWatchedWallets(subs);
+  const message = formatWatchedWallets(watches);
+  if (message.length <= 3500) {
+    await bot.sendMessage(msg.chat.id, message, adminHtml);
+    return;
+  }
+
+  const file = await writeTempFile('watched-wallets.txt', buildWatchedWalletsExport(watches, subs));
+  await bot.sendDocument(msg.chat.id, file, adminKeyboard, { filename: 'watched-wallets.txt', contentType: 'text/plain' });
+  await fs.rm(file, { force: true });
 });
 
 bot.onText(/^\/add(?:\s+([\s\S]+))?/, async (msg, match) => {
@@ -930,6 +947,122 @@ function formatSubscriptionStats(subs) {
   ].join('\n');
 }
 
+function collectWatchedWallets(subs) {
+  const items = [];
+  for (const user of Object.values(subs?.users ?? {})) {
+    for (const watch of user.watches ?? []) {
+      const lastSuccessfulAt = watch.lastSuccessfulCheckedAt ?? (watch.lastStatus === 'checked' ? watch.lastCheckedAt : null);
+      const lastSuccessfulRisk = watch.lastSuccessfulRisk ?? (watch.lastStatus === 'checked' ? watch.lastRisk : null);
+      items.push({
+        userId: user.userId,
+        userName: displayUser(user),
+        chatId: user.chatId,
+        address: watch.address,
+        createdAt: watch.createdAt,
+        updatedAt: watch.updatedAt,
+        lastCheckedAt: watch.lastCheckedAt,
+        lastSuccessfulCheckedAt: lastSuccessfulAt,
+        lastStatus: watch.lastStatus ?? null,
+        lastRisk: watch.lastRisk ?? null,
+        lastSuccessfulRisk,
+        lastError: watch.lastError ?? null,
+        knownRiskCount: watch.knownRiskKeys?.length ?? 0,
+      });
+    }
+  }
+
+  return items.sort((a, b) => {
+    const aTime = a.lastCheckedAt ?? a.createdAt ?? '';
+    const bTime = b.lastCheckedAt ?? b.createdAt ?? '';
+    return bTime.localeCompare(aTime);
+  });
+}
+
+function formatWatchedWallets(items) {
+  const counts = items.reduce((acc, item) => {
+    const key = item.lastStatus ?? 'unknown';
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  if (items.length === 0) {
+    return [
+      '<b>محافظ المتابعة</b>',
+      '',
+      'لا توجد محافظ متابعة حاليا.',
+    ].join('\n');
+  }
+
+  return [
+    '<b>محافظ المتابعة</b>',
+    '',
+    `الإجمالي: <b>${items.length}</b>`,
+    `مكتمل: <b>${counts.checked ?? 0}</b>`,
+    `غير مكتمل: <b>${counts.incomplete ?? 0}</b>`,
+    `فشل: <b>${counts.failed ?? 0}</b>`,
+    `بدون فحص: <b>${counts.unknown ?? 0}</b>`,
+    '',
+    ...items.map((item, index) => formatWatchedWalletItem(item, index)),
+  ].join('\n\n');
+}
+
+function formatWatchedWalletItem(item, index) {
+  return [
+    `${index + 1}. <code>${escapeHtml(item.address)}</code>`,
+    `المستخدم: <code>${escapeHtml(item.userId ?? '-')}</code> — ${escapeHtml(item.userName ?? '-')}`,
+    `آخر فحص مكتمل: <code>${shortDate(item.lastSuccessfulCheckedAt)}</code>`,
+    item.lastStatus && item.lastStatus !== 'checked' ? `آخر محاولة: <code>${shortDate(item.lastCheckedAt)}</code>` : null,
+    `الحالة: ${watchStatusLabel(item.lastStatus)}`,
+    `المخاطر: ${riskLabel(item.lastSuccessfulRisk ?? item.lastRisk)}`,
+    item.lastError ? `الخطأ: ${escapeHtml(shortError(item.lastError))}` : null,
+  ].filter(Boolean).join('\n');
+}
+
+function buildWatchedWalletsExport(items, subs) {
+  const lines = [];
+  lines.push(`updatedAt: ${subs?.updatedAt ?? '-'}`);
+  lines.push(`watchedWallets: ${items.length}`);
+  lines.push('');
+
+  for (const item of items) {
+    lines.push(`ADDRESS ${item.address}`);
+    lines.push(`userId: ${item.userId ?? '-'}`);
+    lines.push(`user: ${item.userName ?? '-'}`);
+    lines.push(`chatId: ${item.chatId ?? '-'}`);
+    lines.push(`createdAt: ${item.createdAt ?? '-'}`);
+    lines.push(`updatedAt: ${item.updatedAt ?? '-'}`);
+    lines.push(`lastSuccessfulCheckedAt: ${item.lastSuccessfulCheckedAt ?? '-'}`);
+    lines.push(`lastCheckedAt: ${item.lastCheckedAt ?? '-'}`);
+    lines.push(`status: ${item.lastStatus ?? '-'}`);
+    lines.push(`risk: ${item.lastSuccessfulRisk ?? item.lastRisk ?? '-'}`);
+    lines.push(`knownRiskKeys: ${item.knownRiskCount}`);
+    if (item.lastError) lines.push(`lastError: ${item.lastError}`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+function watchStatusLabel(status) {
+  if (status === 'checked') return 'مكتمل';
+  if (status === 'incomplete') return 'غير مكتمل';
+  if (status === 'failed') return 'فشل';
+  return 'لم يفحص بعد';
+}
+
+function riskLabel(risk) {
+  if (risk === 'blacklisted') return 'محظورة';
+  if (risk === 'high') return 'عالية';
+  if (risk === 'medium') return 'متوسطة';
+  if (risk === 'safe') return 'منخفضة';
+  return risk ?? '-';
+}
+
+function shortError(value) {
+  const text = String(value ?? '');
+  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+}
+
 function buildUsageExport(usage) {
   const lines = [];
   const users = Object.values(usage.users ?? {})
@@ -1021,6 +1154,7 @@ function helpText() {
     '<code>/status</code> حالة القاعدة والطابور',
     '<code>/stats</code> إحصائيات مختصرة كاملة',
     '<code>/subs</code> إحصائيات الاشتراكات والمدفوعات',
+    '<code>/watches</code> كل محافظ المتابعة وحالة فحصها',
     '<code>/add T...</code> إضافة بذور',
     '<code>/pending</code> العناوين المنتظرة',
     '<code>/blocked</code> آخر العناوين المحظورة',
