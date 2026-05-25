@@ -35,7 +35,10 @@ export async function checkOnChain(address, options = {}) {
   await delay(400);
   const blacklisted = await settle(() => isBlacklistedByTether(address));
   await delay(400);
-  const oklinkRisk = await settle(() => screenTronAddressRisk(address));
+  const includeExternalRisk = options.includeExternalRisk !== false;
+  const oklinkRisk = includeExternalRisk
+    ? await settle(() => screenTronAddressRisk(address))
+    : { status: 'fulfilled', value: null };
   await delay(400);
   let trustedEntity = await getTrustedEntity(address);
   await delay(100);

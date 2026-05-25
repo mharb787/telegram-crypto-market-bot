@@ -115,6 +115,15 @@ export async function handleMessage(bot, msg) {
     return;
   }
 
+  if (isGulfexUser(user)) {
+    const formatResult = validateTRC20(text);
+    if (formatResult.valid) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(chatId, checkModeText(text), checkModeOptions(text));
+      return;
+    }
+  }
+
   await handleWalletCheck(bot, msg, db, user, text);
 }
 
@@ -182,6 +191,19 @@ export async function handleCallback(bot, query) {
     await saveSubscriptions(db);
     await deleteMessageQuietly(bot, msg.chat.id, waiting.message_id);
     await bot.sendMessage(msg.chat.id, immediateWatchScanText(scan), walletMessageOptions(watch));
+    return;
+  }
+
+  if (data.startsWith('wallet_check:')) {
+    const [, mode, address] = data.split(':');
+    await bot.answerCallbackQuery(query.id, { text: mode === 'deep' ? 'جاري الفحص العميق...' : 'جاري الفحص العادي...' });
+    const formatResult = validateTRC20(address);
+    if (!formatResult.valid) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(msg.chat.id, invalidAddressMessage(address, formatResult.reason), { parse_mode: 'Markdown', ...mainKeyboard });
+      return;
+    }
+    await handleWalletCheck(bot, { ...msg, text: address, from: query.from }, db, user, address, { mode });
     return;
   }
 
@@ -257,7 +279,7 @@ export async function handlePaidCommand(bot, msg) {
   await verifyPaymentStatus(bot, msg.chat.id, db, user, pending.id);
 }
 
-async function handleWalletCheck(bot, msg, db, user, text) {
+async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
   const chatId = msg.chat.id;
   const formatResult = validateTRC20(text);
 
@@ -282,7 +304,9 @@ async function handleWalletCheck(bot, msg, db, user, text) {
   const loading = await bot.sendMessage(chatId, loadingMessage(text), { parse_mode: 'Markdown' });
 
   try {
-    const onchain = await checkOnChain(text);
+    const onchain = await checkOnChain(text, {
+      includeExternalRisk: options.mode !== 'normal',
+    });
     consumeSearch(user);
     await saveSubscriptions(db);
     await recordUsage(msg, text, onchain);
@@ -624,6 +648,33 @@ function resultWatchOptions(address) {
       ]],
     },
   };
+}
+
+function checkModeText(address) {
+  return [
+    'اختر نوع الفحص:',
+    '',
+    `\`${address}\``,
+    '',
+    'الفحص العادي: الحظر المباشر والتعامل المباشر مع عناوين محظورة.',
+    'الفحص العميق: يشمل المخاطر المباشرة وغير المباشرة.',
+  ].join('\n');
+}
+
+function checkModeOptions(address) {
+  return {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [[
+        { text: 'فحص عادي', callback_data: `wallet_check:normal:${address}` },
+        { text: 'فحص عميق', callback_data: `wallet_check:deep:${address}` },
+      ]],
+    },
+  };
+}
+
+function isGulfexUser(user) {
+  return String(user?.username ?? '').replace(/^@/, '').toLowerCase() === 'gulfex';
 }
 
 function watchResultText(result) {
