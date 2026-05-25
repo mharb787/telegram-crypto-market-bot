@@ -610,7 +610,6 @@ function walletMessageOptions(watch) {
       inline_keyboard: [[
         { text: 'حذف', callback_data: `watch_del:${watch.id}` },
         { text: 'تعديل', callback_data: `watch_edit:${watch.id}` },
-        { text: 'فحص الآن', callback_data: `watch_scan:${watch.id}` },
       ]],
     },
   };
