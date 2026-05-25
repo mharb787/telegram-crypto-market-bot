@@ -111,15 +111,13 @@ bot.onText(/^\/watches/, async (msg) => {
   if (!isAllowed(msg)) return;
   const subs = await loadSubscriptions();
   const watches = collectWatchedWallets(subs);
-  const message = formatWatchedWallets(watches);
-  if (message.length <= 3500) {
-    await bot.sendMessage(msg.chat.id, message, adminHtml);
-    return;
+  for (const message of splitMessages(formatWatchedWallets(watches), 3500)) {
+    await bot.sendMessage(msg.chat.id, message, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...adminKeyboard,
+    });
   }
-
-  const file = await writeTempFile('watched-wallets.txt', buildWatchedWalletsExport(watches, subs));
-  await bot.sendDocument(msg.chat.id, file, adminKeyboard, { filename: 'watched-wallets.txt', contentType: 'text/plain' });
-  await fs.rm(file, { force: true });
 });
 
 bot.onText(/^\/add(?:\s+([\s\S]+))?/, async (msg, match) => {
@@ -948,11 +946,15 @@ function formatSubscriptionStats(subs) {
 }
 
 function collectWatchedWallets(subs) {
+  const alerts = Object.values(subs?.alerts ?? {});
   const items = [];
   for (const user of Object.values(subs?.users ?? {})) {
     for (const watch of user.watches ?? []) {
       const lastSuccessfulAt = watch.lastSuccessfulCheckedAt ?? (watch.lastStatus === 'checked' ? watch.lastCheckedAt : null);
       const lastSuccessfulRisk = watch.lastSuccessfulRisk ?? (watch.lastStatus === 'checked' ? watch.lastRisk : null);
+      const sentAlerts = alerts
+        .filter(alert => alert.userId === user.userId && alert.watchAddress === watch.address)
+        .reduce((sum, alert) => sum + Number(alert.sentCount ?? 0), 0);
       items.push({
         userId: user.userId,
         userName: displayUser(user),
@@ -967,6 +969,7 @@ function collectWatchedWallets(subs) {
         lastSuccessfulRisk,
         lastError: watch.lastError ?? null,
         knownRiskCount: watch.knownRiskKeys?.length ?? 0,
+        sentAlerts,
       });
     }
   }
@@ -1002,45 +1005,14 @@ function formatWatchedWallets(items) {
     `فشل: <b>${counts.failed ?? 0}</b>`,
     `بدون فحص: <b>${counts.unknown ?? 0}</b>`,
     '',
-    ...items.map((item, index) => formatWatchedWalletItem(item, index)),
-  ].join('\n\n');
+    ...items.map((item, index) => formatWatchedWalletLine(item, index)),
+  ].join('\n');
 }
 
-function formatWatchedWalletItem(item, index) {
-  return [
-    `${index + 1}. <code>${escapeHtml(item.address)}</code>`,
-    `المستخدم: <code>${escapeHtml(item.userId ?? '-')}</code> — ${escapeHtml(item.userName ?? '-')}`,
-    `آخر فحص مكتمل: <code>${shortDate(item.lastSuccessfulCheckedAt)}</code>`,
-    item.lastStatus && item.lastStatus !== 'checked' ? `آخر محاولة: <code>${shortDate(item.lastCheckedAt)}</code>` : null,
-    `الحالة: ${watchStatusLabel(item.lastStatus)}`,
-    `المخاطر: ${riskLabel(item.lastSuccessfulRisk ?? item.lastRisk)}`,
-    item.lastError ? `الخطأ: ${escapeHtml(shortError(item.lastError))}` : null,
-  ].filter(Boolean).join('\n');
-}
-
-function buildWatchedWalletsExport(items, subs) {
-  const lines = [];
-  lines.push(`updatedAt: ${subs?.updatedAt ?? '-'}`);
-  lines.push(`watchedWallets: ${items.length}`);
-  lines.push('');
-
-  for (const item of items) {
-    lines.push(`ADDRESS ${item.address}`);
-    lines.push(`userId: ${item.userId ?? '-'}`);
-    lines.push(`user: ${item.userName ?? '-'}`);
-    lines.push(`chatId: ${item.chatId ?? '-'}`);
-    lines.push(`createdAt: ${item.createdAt ?? '-'}`);
-    lines.push(`updatedAt: ${item.updatedAt ?? '-'}`);
-    lines.push(`lastSuccessfulCheckedAt: ${item.lastSuccessfulCheckedAt ?? '-'}`);
-    lines.push(`lastCheckedAt: ${item.lastCheckedAt ?? '-'}`);
-    lines.push(`status: ${item.lastStatus ?? '-'}`);
-    lines.push(`risk: ${item.lastSuccessfulRisk ?? item.lastRisk ?? '-'}`);
-    lines.push(`knownRiskKeys: ${item.knownRiskCount}`);
-    if (item.lastError) lines.push(`lastError: ${item.lastError}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
+function formatWatchedWalletLine(item, index) {
+  const date = item.lastSuccessfulCheckedAt ?? item.lastCheckedAt;
+  const status = watchLineStatus(item);
+  return `${index + 1}. <a href="https://tronscan.org/#/address/${encodeURIComponent(item.address)}">${escapeHtml(shortAddress(item.address))}</a> | <a href="tg://user?id=${encodeURIComponent(item.userId ?? '')}">${escapeHtml(shortUser(item))}</a> | ${escapeHtml(shortDate(date))} | ${escapeHtml(status)} | تنبيهات: <b>${item.sentAlerts}</b>`;
 }
 
 function watchStatusLabel(status) {
@@ -1048,6 +1020,12 @@ function watchStatusLabel(status) {
   if (status === 'incomplete') return 'غير مكتمل';
   if (status === 'failed') return 'فشل';
   return 'لم يفحص بعد';
+}
+
+function watchLineStatus(item) {
+  if (item.lastStatus === 'incomplete') return 'غير مكتمل';
+  if (item.lastStatus === 'failed') return 'فشل';
+  return riskLabel(item.lastSuccessfulRisk ?? item.lastRisk);
 }
 
 function riskLabel(risk) {
@@ -1058,9 +1036,29 @@ function riskLabel(risk) {
   return risk ?? '-';
 }
 
-function shortError(value) {
-  const text = String(value ?? '');
-  return text.length > 140 ? `${text.slice(0, 140)}...` : text;
+function shortAddress(address) {
+  if (!address || address.length <= 12) return address ?? '-';
+  return `${address.slice(0, 5)}...${address.slice(-5)}`;
+}
+
+function shortUser(item) {
+  const value = item.userName && item.userName !== '-' ? item.userName : item.userId;
+  return value ?? '-';
+}
+
+function splitMessages(message, maxLength = 3500) {
+  if (message.length <= maxLength) return [message];
+  const chunks = [];
+  let current = '';
+  for (const line of message.split('\n')) {
+    if (current && current.length + line.length + 1 > maxLength) {
+      chunks.push(current);
+      current = '';
+    }
+    current += current ? `\n${line}` : line;
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 function buildUsageExport(usage) {
