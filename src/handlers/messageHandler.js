@@ -623,6 +623,7 @@ function watchStatusLabel(status) {
 function riskLabel(risk) {
   if (risk === 'blacklisted') return 'محظورة';
   if (risk === 'high') return 'عالية';
+  if (risk === 'low') return 'منخفضة';
   if (risk === 'medium') return 'متوسطة';
   if (risk === 'safe') return 'منخفضة';
   return risk ?? '-';

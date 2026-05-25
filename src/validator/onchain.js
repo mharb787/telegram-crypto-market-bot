@@ -84,6 +84,9 @@ export async function checkOnChain(address, options = {}) {
   const blacklistAudit = shouldAuditCounterparties
     ? await auditBlacklistedCounterparties(address, auditTransfers, counterparties)
     : { bannedCounterparties: [], interactions: [], unknownCounterparties: [] };
+  const indirectRiskInteractions = includeExternalRisk && !trustedEntity
+    ? await findIndirectRiskInteractions(address, auditTransfers, blacklistAudit.bannedCounterparties)
+    : [];
 
   if (isBanned === true || blacklistAudit.interactions.length > 0) {
     await settle(() => persistRiskFindings(address, isBanned, blacklistAudit.interactions));
@@ -97,6 +100,7 @@ export async function checkOnChain(address, options = {}) {
     isBanned,
     ageInfo,
     bannedCounterparties: blacklistAudit.bannedCounterparties,
+    indirectRiskInteractions,
     oklink,
     local: refreshedLocal,
     trustedEntity,
@@ -119,6 +123,7 @@ export async function checkOnChain(address, options = {}) {
     reviewedInteractions:  auditTransfers.map(tx => buildInteraction(address, tx)).filter(Boolean),
     bannedCounterparties: blacklistAudit.bannedCounterparties,
     blacklistedInteractions: blacklistAudit.interactions,
+    indirectRiskInteractions,
     unknownCounterparties: blacklistAudit.unknownCounterparties,
     oklinkRisk:           oklink,
     localRisk:            refreshedLocal,
@@ -213,6 +218,32 @@ async function auditBlacklistedCounterparties(address, transfers, counterparties
     .filter(item => item && bannedSet.has(item.counterparty));
 
   return { bannedCounterparties, interactions, unknownCounterparties };
+}
+
+async function findIndirectRiskInteractions(address, transfers, bannedCounterparties = []) {
+  const bannedSet = new Set(bannedCounterparties);
+  const seen = new Set();
+  const interactions = [];
+
+  for (const tx of transfers) {
+    const interaction = buildInteraction(address, tx);
+    if (!interaction?.counterparty) continue;
+    if (bannedSet.has(interaction.counterparty)) continue;
+    if (seen.has(interaction.counterparty)) continue;
+    if (await getTrustedEntity(interaction.counterparty)) continue;
+
+    const risk = await loadLocalRisk(interaction.counterparty);
+    if (risk.isBlacklisted === true) continue;
+    if (risk.blacklistedInteractionCount <= 0) continue;
+
+    seen.add(interaction.counterparty);
+    interactions.push({
+      ...interaction,
+      indirectRiskCount: risk.blacklistedInteractionCount,
+    });
+  }
+
+  return interactions;
 }
 
 async function filterUntrustedCounterparties(counterparties) {
@@ -322,12 +353,13 @@ async function persistRiskFindings(address, isBanned, interactions) {
   if (changed) await saveRiskDb(db);
 }
 
-function computeRisk({ isBanned, ageInfo, bannedCounterparties, oklink, local, trustedEntity }) {
+function computeRisk({ isBanned, ageInfo, bannedCounterparties, indirectRiskInteractions, oklink, local, trustedEntity }) {
   if (isBanned)                      return 'blacklisted';
   if (trustedEntity)                 return 'safe';
   if (bannedCounterparties.length)   return 'high';
   if (oklink?.available && oklink.associatedBlackAddresses > 0) return 'high';
   if (local?.blacklistedInteractionCount > 0) return 'high';
+  if (indirectRiskInteractions?.length > 0) return 'low';
   if (ageInfo && ageInfo.days < 7)   return 'medium';
   return 'safe';
 }

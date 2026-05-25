@@ -23,6 +23,7 @@ export function loadingMessage(address) {
 export function onChainReport(address, fmtNumber, onchain) {
   const localCount = onchain.localRisk?.blacklistedInteractionCount ?? 0;
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
+  const indirectCount = onchain.indirectRiskInteractions?.length ?? 0;
   const trusted = onchain.blacklisted === true ? null : onchain.trustedEntity;
   const blacklistTxCount = trusted ? directCount : Math.max(localCount, directCount);
   const events = trusted ? [] : collectRiskEvents(address, onchain).slice(0, 5);
@@ -41,7 +42,7 @@ export function onChainReport(address, fmtNumber, onchain) {
     `*USDT:* $${fmtNumber(onchain.balance?.usdt ?? 0, 2)} — ${statusLabel(onchain)}`,
     '',
     '🔗 *الارتباطات*',
-    connectionSummary(blacklistTxCount, trusted),
+    connectionSummary(blacklistTxCount, trusted, indirectCount),
     usdtScopeNote(onchain, blacklistTxCount),
     '',
     '📜 *سجل الأحداث*',
@@ -71,6 +72,7 @@ function walletType(onchain, blacklistTxCount) {
   if (onchain.blacklisted === true) return 'عنوان محظور';
   if (onchain.trustedEntity) return `منصة مركزية موثوقة: ${onchain.trustedEntity.name ?? 'منصة'}`;
   if (blacklistTxCount > 0) return 'غير محظور لكنه تعامل مع القائمة السوداء';
+  if ((onchain.indirectRiskInteractions?.length ?? 0) > 0) return 'غير محظور لكن لديه ارتباطات منخفضة الخطورة';
   if (onchain.blacklisted === null) return 'تعذر التحقق منه';
   if ((onchain.totalTransactions ?? 0) === 0) return 'لا توجد معاملات USDT ضمن الفحص الحالي';
   return 'لم تظهر مؤشرات خطر ضمن الفحص الحالي';
@@ -79,6 +81,7 @@ function walletType(onchain, blacklistTxCount) {
 function statusLabel(onchain) {
   if (onchain.blacklisted === true) return '❌ محظور';
   if (onchain.risk === 'high') return '⚠️ عالي الخطورة';
+  if (onchain.risk === 'low') return '⚠️ منخفض الخطورة';
   if (onchain.blacklisted === false) return '✅ غير محظور';
   return '⚠️ غير معروف';
 }
@@ -89,11 +92,14 @@ function directBlacklistStatus(onchain) {
   return '⚠️ تعذر التحقق';
 }
 
-function connectionSummary(blacklistTxCount, trusted = null) {
+function connectionSummary(blacklistTxCount, trusted = null, indirectCount = 0) {
   if (trusted) {
     return 'ℹ️ *تقييم الارتباطات:* غير مطبق على عناوين المنصات المركزية';
   }
   if (blacklistTxCount === 0) {
+    if (indirectCount > 0) {
+      return `⚠️ *تعاملات USDT مع عناوين عالية الخطورة:* ${indirectCount} عملية`;
+    }
     return '✅ *تعاملات USDT مع القائمة السوداء:* لم تظهر ضمن الفحص الحالي';
   }
   if (blacklistTxCount > 0) {
@@ -112,6 +118,9 @@ function usdtScopeNote(onchain, blacklistTxCount) {
     return 'ℹ️ *نطاق الفحص:* لم يتم العثور على معاملات USDT لهذا العنوان ضمن حد الفحص الحالي';
   }
   if (blacklistTxCount === 0) {
+    if ((onchain.indirectRiskInteractions?.length ?? 0) > 0) {
+      return `ℹ️ *نطاق الفحص:* تم فحص آخر ${onchain.reviewedTransactions ?? onchain.totalTransactions} معاملة USDT وظهرت تعاملات مع عناوين عالية الخطورة غير محظورة حاليا`;
+    }
     return `ℹ️ *نطاق الفحص:* تم فحص آخر ${onchain.reviewedTransactions ?? onchain.totalTransactions} معاملة USDT ولم تظهر تعاملات محظورة`;
   }
   return 'ℹ️ *نطاق الفحص:* العلاقات أعلاه محسوبة من معاملات USDT فقط';
