@@ -43,7 +43,11 @@ export async function checkOnChain(address, options = {}) {
   await delay(400);
   const firstTx = await settle(() => getFirstTransaction(address));
   await delay(400);
-  const transfers = await settle(() => getRecentUSDTTransfers(address, { maxTransactions: reviewLimit }));
+  const transfers = await settle(() => getRecentUSDTTransfers(address, {
+    maxTransactions: reviewLimit,
+    pageLimit: Number(options.pageLimit) || undefined,
+    fingerprint: options.transferFingerprint,
+  }));
 
   const acc       = account.status    === 'fulfilled' ? account.value    : null;
   const isBanned  = blacklisted.status === 'fulfilled' ? blacklisted.value : null;
@@ -102,6 +106,8 @@ export async function checkOnChain(address, options = {}) {
     totalTransactions:    usdtTransfers.length,
     reviewedTransactions: txList.length,
     reviewLimit,
+    nextTransferFingerprint: txList.nextFingerprint ?? null,
+    transferHistoryHasMore: Boolean(txList.hasMore),
     transferHistoryIncomplete: Boolean(txList.incomplete),
     transferHistoryStopReason: txList.stopReason ?? null,
     tetherCounterpartyVerification: shouldAuditCounterparties,

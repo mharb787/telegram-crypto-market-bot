@@ -200,6 +200,7 @@ export function addWatch(user, address) {
     lastSuccessfulCheckedAt: null,
     lastSuccessfulRisk: null,
     lastSuccessfulReviewedTransactions: null,
+    scanProgress: null,
     knownRiskKeys: [],
   };
   user.watches.push(watch);
@@ -224,6 +225,7 @@ export function replaceWatch(user, id, address) {
   watch.lastSuccessfulCheckedAt = null;
   watch.lastSuccessfulRisk = null;
   watch.lastSuccessfulReviewedTransactions = null;
+  watch.scanProgress = null;
   watch.lastStatus = null;
   watch.lastRisk = null;
   watch.lastError = null;

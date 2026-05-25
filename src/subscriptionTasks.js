@@ -21,7 +21,8 @@ const PAYMENT_SCAN_MS = Math.max(30_000, Number(process.env.PAYMENT_SCAN_MS) || 
 const WATCH_SCAN_MS = Math.max(60_000, Number(process.env.WATCH_SCAN_MS) || 60 * 60_000);
 const ALERT_SCAN_MS = Math.max(60_000, Number(process.env.ALERT_SCAN_MS) || 5 * 60_000);
 const REMINDER_SCAN_MS = Math.max(60_000, Number(process.env.REMINDER_SCAN_MS) || 60 * 60_000);
-const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 300);
+const WATCH_REVIEW_LIMIT = Math.max(100, Number(process.env.WATCH_USDT_REVIEW_LIMIT) || 500);
+const WATCH_SCAN_CHUNK_SIZE = Math.max(50, Number(process.env.WATCH_SCAN_CHUNK_SIZE) || 100);
 const WATCH_MIN_USDT = Math.max(0, Number(process.env.WATCH_MIN_USDT) || 1000);
 const WATCH_SCAN_DELAY_MS = Math.max(0, Number(process.env.WATCH_SCAN_DELAY_MS) || 120_000);
 
@@ -89,7 +90,7 @@ async function scanWatchedWallets() {
 
     for (let i = 0; i < items.length; i += 1) {
       const { user, watch } = items[i];
-      const result = await scanSingleWatchedWallet(db, user, watch);
+      const result = await scanSingleWatchedWallet(db, user, watch, { periodic: true });
       if (result.changed) await saveSubscriptions(db);
       if (i + 1 < items.length && WATCH_SCAN_DELAY_MS > 0) {
         await delay(WATCH_SCAN_DELAY_MS);
@@ -103,6 +104,10 @@ async function scanWatchedWallets() {
 export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
   try {
     const checkedAt = new Date().toISOString();
+    if (options.periodic && isWatchScanCompleteForToday(watch, checkedAt)) {
+      return { changed: false, skippedCompletedToday: true };
+    }
+    const scanProgress = getWatchScanProgress(watch, checkedAt, options);
     if (await getTrustedEntity(watch.address)) {
       watch.lastCheckedAt = checkedAt;
       watch.lastStatus = 'checked';
@@ -111,22 +116,37 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
       watch.lastSuccessfulCheckedAt = checkedAt;
       watch.lastSuccessfulRisk = 'safe';
       watch.lastSuccessfulReviewedTransactions = 0;
+      watch.scanProgress = completeWatchScanProgress(scanProgress, checkedAt, 0);
       return { changed: true, skippedTrusted: true, alertsCreated: 0, interactions: [] };
     }
 
     const onchain = await checkOnChain(watch.address, {
-      maxReviewedTransfers: WATCH_REVIEW_LIMIT,
+      maxReviewedTransfers: scanProgress.chunkSize,
+      pageLimit: scanProgress.chunkSize,
+      transferFingerprint: scanProgress.nextFingerprint || undefined,
       minAuditUsdt: WATCH_MIN_USDT,
       forceCounterpartyAudit: true,
     });
+    const chunkReviewed = Number(onchain.reviewedTransactions ?? 0);
+    const scanned = Math.min(scanProgress.target, scanProgress.scanned + chunkReviewed);
+    const isComplete = !onchain.apiError && (!onchain.transferHistoryHasMore || scanned >= scanProgress.target);
     watch.lastCheckedAt = checkedAt;
-    watch.lastStatus = onchain.apiError ? 'incomplete' : 'checked';
+    watch.lastStatus = onchain.apiError ? 'incomplete' : (isComplete ? 'checked' : 'partial');
     watch.lastRisk = onchain.risk ?? null;
     watch.lastError = onchain.apiError ? (onchain.apiErrorReason ?? 'incomplete scan') : null;
     if (!onchain.apiError) {
+      watch.scanProgress = {
+        ...scanProgress,
+        scanned,
+        nextFingerprint: onchain.nextTransferFingerprint ?? null,
+        updatedAt: checkedAt,
+        completedAt: isComplete ? checkedAt : null,
+      };
+    }
+    if (isComplete) {
       watch.lastSuccessfulCheckedAt = checkedAt;
       watch.lastSuccessfulRisk = onchain.risk ?? null;
-      watch.lastSuccessfulReviewedTransactions = onchain.reviewedTransactions ?? null;
+      watch.lastSuccessfulReviewedTransactions = scanned;
     }
 
     if (onchain.trustedEntity && onchain.blacklisted !== true) {
@@ -184,6 +204,50 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
     logger.warn(`Watched wallet scan failed ${watch.address}: ${err.message}`);
     return { changed: true, error: err };
   }
+}
+
+function isWatchScanCompleteForToday(watch, checkedAt) {
+  return watch.scanProgress?.dayKey === checkedAt.slice(0, 10) && Boolean(watch.scanProgress.completedAt);
+}
+
+function getWatchScanProgress(watch, checkedAt, options = {}) {
+  const target = Math.max(WATCH_SCAN_CHUNK_SIZE, Number(options.reviewLimit) || WATCH_REVIEW_LIMIT);
+  const chunkSize = Math.min(target, Math.max(50, Number(options.chunkSize) || WATCH_SCAN_CHUNK_SIZE));
+  const dayKey = checkedAt.slice(0, 10);
+  const current = watch.scanProgress;
+  if (!current || current.dayKey !== dayKey || current.completedAt) {
+    return {
+      dayKey,
+      target,
+      chunkSize,
+      scanned: 0,
+      nextFingerprint: null,
+      startedAt: checkedAt,
+      updatedAt: null,
+      completedAt: null,
+    };
+  }
+
+  return {
+    dayKey,
+    target: Number(current.target ?? target),
+    chunkSize: Number(current.chunkSize ?? chunkSize),
+    scanned: Number(current.scanned ?? 0),
+    nextFingerprint: current.nextFingerprint ?? null,
+    startedAt: current.startedAt ?? checkedAt,
+    updatedAt: current.updatedAt ?? null,
+    completedAt: current.completedAt ?? null,
+  };
+}
+
+function completeWatchScanProgress(progress, checkedAt, scanned) {
+  return {
+    ...progress,
+    scanned,
+    nextFingerprint: null,
+    updatedAt: checkedAt,
+    completedAt: checkedAt,
+  };
 }
 
 async function findIndirectRiskInteractions(onchain, confirmedInteractions) {

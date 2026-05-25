@@ -970,6 +970,7 @@ function collectWatchedWallets(subs) {
         lastError: watch.lastError ?? null,
         knownRiskCount: watch.knownRiskKeys?.length ?? 0,
         sentAlerts,
+        scanProgress: watch.scanProgress ?? null,
       });
     }
   }
@@ -1001,6 +1002,7 @@ function formatWatchedWallets(items) {
     '',
     `الإجمالي: <b>${items.length}</b>`,
     `مكتمل: <b>${counts.checked ?? 0}</b>`,
+    `قيد الفحص: <b>${counts.partial ?? 0}</b>`,
     `غير مكتمل: <b>${counts.incomplete ?? 0}</b>`,
     `فشل: <b>${counts.failed ?? 0}</b>`,
     `بدون فحص: <b>${counts.unknown ?? 0}</b>`,
@@ -1017,12 +1019,17 @@ function formatWatchedWalletLine(item, index) {
 
 function watchStatusLabel(status) {
   if (status === 'checked') return 'مكتمل';
+  if (status === 'partial') return 'قيد الفحص';
   if (status === 'incomplete') return 'غير مكتمل';
   if (status === 'failed') return 'فشل';
   return 'لم يفحص بعد';
 }
 
 function watchLineStatus(item) {
+  if (item.lastStatus === 'partial') {
+    const progress = item.scanProgress ? ` ${item.scanProgress.scanned ?? 0}/${item.scanProgress.target ?? '-'}` : '';
+    return `قيد الفحص${progress}`;
+  }
   if (item.lastStatus === 'incomplete') return 'غير مكتمل';
   if (item.lastStatus === 'failed') return 'فشل';
   return riskLabel(item.lastSuccessfulRisk ?? item.lastRisk);

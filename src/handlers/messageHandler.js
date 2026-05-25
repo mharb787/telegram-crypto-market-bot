@@ -573,6 +573,9 @@ async function sendWatchedWallets(bot, chatId, user) {
 function walletMessageText(watch) {
   const lastSuccessfulAt = watch.lastSuccessfulCheckedAt ?? (watch.lastStatus === 'checked' ? watch.lastCheckedAt : null);
   const lastSuccessfulRisk = watch.lastSuccessfulRisk ?? (watch.lastStatus === 'checked' ? watch.lastRisk : null);
+  const progress = watch.scanProgress && watch.lastStatus === 'partial'
+    ? `تقدم الفحص: ${watch.scanProgress.scanned ?? 0}/${watch.scanProgress.target ?? '-'}`
+    : null;
   return [
     '🛡️ محفظة متابعة',
     '',
@@ -580,12 +583,14 @@ function walletMessageText(watch) {
     `آخر فحص مكتمل: ${shortDate(lastSuccessfulAt)}`,
     watch.lastStatus && watch.lastStatus !== 'checked' ? `آخر محاولة: ${shortDate(watch.lastCheckedAt)}` : null,
     `الحالة: ${watchStatusLabel(watch.lastStatus)}`,
+    progress,
     lastSuccessfulRisk ? `المخاطر: ${riskLabel(lastSuccessfulRisk)}` : null,
   ].filter(Boolean).join('\n');
 }
 
 function watchStatusLabel(status) {
   if (status === 'checked') return 'تم الفحص';
+  if (status === 'partial') return 'قيد الفحص';
   if (status === 'incomplete') return 'فحص غير مكتمل';
   if (status === 'failed') return 'فشل الفحص';
   return '-';
@@ -660,6 +665,11 @@ function immediateWatchScanText(scan) {
 
   if (scan.onchain?.apiError) {
     return 'تمت إضافة المحفظة، لكن الفحص الفوري غير مكتمل بسبب ضغط أو خطأ من مزود الشبكة. سيعاد فحصها تلقائيا كل ساعة.';
+  }
+
+  if (scan.onchain?.transferHistoryHasMore) {
+    const progress = scan.onchain?.reviewedTransactions ?? 0;
+    return `✅ تمت إضافة المحفظة للمتابعة وبدأ فحصها التدريجي.\nتم فحص أول ${progress} معاملة USDT الآن.\nسيكمل البوت باقي الشرائح تلقائيا كل ساعة ويرسل تنبيها عند ظهور أي مخاطر.`;
   }
 
   const localCount = scan.onchain?.localRisk?.blacklistedInteractionCount ?? 0;
