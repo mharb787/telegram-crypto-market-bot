@@ -19,7 +19,7 @@ import { logger } from '../utils/logger.js';
 
 const SUN = 1_000_000;   // 1 TRX  = 1,000,000 sun
 const MU  = 1_000_000;   // 1 USDT = 1,000,000 micro-USDT
-const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_LIMIT) || 500);
+const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_LIMIT) || 200);
 const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 1);
 const VERIFY_COUNTERPARTIES_WITH_TETHER = process.env.VERIFY_COUNTERPARTIES_WITH_TETHER === 'true';
 const MIN_USER_AUDIT_USDT = Math.max(0, Number(process.env.MIN_USER_AUDIT_USDT) || 2000);
