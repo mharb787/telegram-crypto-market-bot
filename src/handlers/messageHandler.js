@@ -253,7 +253,11 @@ export async function handleCallback(bot, query) {
     user.state = { type: 'payment_from_address' };
     await saveSubscriptions(db);
     await bot.answerCallbackQuery(query.id, { text: 'أرسل عنوان الدفع' });
-    await bot.sendMessage(msg.chat.id, 'أرسل عنوان TRC20 الذي سترسل منه الدفعة.', cancelFlowOptions());
+    await bot.sendMessage(
+      msg.chat.id,
+      'أرسل عنوان TRC20 الذي سترسل منه الدفعة.\n\nأو تواصل مع المسؤول مباشرة لإتمام الاشتراك:\n@gulfex',
+      cancelFlowOptions()
+    );
     return;
   }
 
