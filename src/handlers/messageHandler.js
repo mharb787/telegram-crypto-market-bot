@@ -115,13 +115,11 @@ export async function handleMessage(bot, msg) {
     return;
   }
 
-  if (isGulfexUser(user)) {
-    const formatResult = validateTRC20(text);
-    if (formatResult.valid) {
-      await saveSubscriptions(db);
-      await bot.sendMessage(chatId, checkModeText(text), checkModeOptions(text));
-      return;
-    }
+  const formatResult = validateTRC20(text);
+  if (formatResult.valid) {
+    await saveSubscriptions(db);
+    await bot.sendMessage(chatId, checkModeText(text), checkModeOptions(text));
+    return;
   }
 
   await handleWalletCheck(bot, msg, db, user, text);
@@ -201,6 +199,11 @@ export async function handleCallback(bot, query) {
     if (!formatResult.valid) {
       await saveSubscriptions(db);
       await bot.sendMessage(msg.chat.id, invalidAddressMessage(address, formatResult.reason), { parse_mode: 'Markdown', ...mainKeyboard });
+      return;
+    }
+    if (mode === 'deep' && !isSubscribed(user)) {
+      await saveSubscriptions(db);
+      await bot.sendMessage(msg.chat.id, deepCheckPaywallText(), subscribeNowOptions());
       return;
     }
     await handleWalletCheck(bot, { ...msg, text: address, from: query.from }, db, user, address, { mode });
@@ -662,6 +665,17 @@ function checkModeText(address) {
   ].join('\n');
 }
 
+function deepCheckPaywallText() {
+  return [
+    '🔒 الفحص العميق متاح للمشتركين فقط.',
+    '',
+    `اشترك بـ ${subscriptionPrice()} USDT شهريا لتحصل على:`,
+    '• فحص عميق للمخاطر المباشرة وغير المباشرة',
+    '• 50 فحص يوميا',
+    `• متابعة مخاطر حتى ${watchLimit()} محافظ`,
+  ].join('\n');
+}
+
 function checkModeOptions(address) {
   return {
     parse_mode: 'Markdown',
@@ -672,10 +686,6 @@ function checkModeOptions(address) {
       ]],
     },
   };
-}
-
-function isGulfexUser(user) {
-  return String(user?.username ?? '').replace(/^@/, '').toLowerCase() === 'gulfex';
 }
 
 function watchResultText(result) {
