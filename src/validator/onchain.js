@@ -19,8 +19,11 @@ import { logger } from '../utils/logger.js';
 
 const SUN = 1_000_000;   // 1 TRX  = 1,000,000 sun
 const MU  = 1_000_000;   // 1 USDT = 1,000,000 micro-USDT
-const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_LIMIT) || 200);
-const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 1);
+const MAX_REVIEWED_USDT_TRANSFERS = Math.max(50, Number(process.env.USDT_REVIEW_LIMIT) || 500);
+const TRON_TRANSFER_PAGE_LIMIT = Math.max(20, Number(process.env.TRON_TRANSFER_PAGE_LIMIT) || 100);
+const TRON_TRANSFER_PAGE_DELAY_MS = Math.max(0, Number(process.env.TRON_TRANSFER_PAGE_DELAY_MS) || 1000);
+const BLACKLIST_CHECK_CONCURRENCY = Math.max(1, Number(process.env.BLACKLIST_CHECK_CONCURRENCY) || 3);
+const BLACKLIST_CHECK_BATCH_DELAY_MS = Math.max(0, Number(process.env.BLACKLIST_CHECK_BATCH_DELAY_MS) || 1000);
 const VERIFY_COUNTERPARTIES_WITH_TETHER = process.env.VERIFY_COUNTERPARTIES_WITH_TETHER === 'true';
 const MIN_USER_AUDIT_USDT = Math.max(0, Number(process.env.MIN_USER_AUDIT_USDT) || 2000);
 
@@ -48,7 +51,8 @@ export async function checkOnChain(address, options = {}) {
   await delay(400);
   const transfers = await settle(() => getRecentUSDTTransfers(address, {
     maxTransactions: reviewLimit,
-    pageLimit: Number(options.pageLimit) || undefined,
+    pageLimit: Number(options.pageLimit) || TRON_TRANSFER_PAGE_LIMIT,
+    pageDelayMs: Number(options.pageDelayMs) || TRON_TRANSFER_PAGE_DELAY_MS,
     fingerprint: options.transferFingerprint,
   }));
 
@@ -189,9 +193,19 @@ function uniqueCounterparties(address, transfers) {
 async function auditBlacklistedCounterparties(address, transfers, counterparties) {
   const statuses = new Map();
   const unknownCounterparties = [];
+  const db = await loadRiskDb();
+  const unknown = [];
 
-  for (let i = 0; i < counterparties.length; i += BLACKLIST_CHECK_CONCURRENCY) {
-    const batch = counterparties.slice(i, i + BLACKLIST_CHECK_CONCURRENCY);
+  for (const addr of counterparties) {
+    if (db.addresses[addr]?.isBlacklisted === true) {
+      statuses.set(addr, true);
+    } else {
+      unknown.push(addr);
+    }
+  }
+
+  for (let i = 0; i < unknown.length; i += BLACKLIST_CHECK_CONCURRENCY) {
+    const batch = unknown.slice(i, i + BLACKLIST_CHECK_CONCURRENCY);
     const results = await Promise.allSettled(
       batch.map(async (addr) => ({
         addr,
@@ -208,8 +222,8 @@ async function auditBlacklistedCounterparties(address, transfers, counterparties
       }
     }
 
-    if (i + BLACKLIST_CHECK_CONCURRENCY < counterparties.length) {
-      await delay(700);
+    if (i + BLACKLIST_CHECK_CONCURRENCY < unknown.length) {
+      await delay(BLACKLIST_CHECK_BATCH_DELAY_MS);
     }
   }
 

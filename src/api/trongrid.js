@@ -84,7 +84,13 @@ export async function getTRC20TransferPage(address, { limit = 200, fingerprint, 
   });
 }
 
-export async function getRecentTRC20Transfers(address, { maxTransactions = 1000, pageLimit = 200, contractAddress, fingerprint: initialFingerprint } = {}) {
+export async function getRecentTRC20Transfers(address, {
+  maxTransactions = 1000,
+  pageLimit = 200,
+  pageDelayMs = 1000,
+  contractAddress,
+  fingerprint: initialFingerprint,
+} = {}) {
   const transfers = [];
   let fingerprint = initialFingerprint;
   let pageErrors = 0;
@@ -118,7 +124,7 @@ export async function getRecentTRC20Transfers(address, { maxTransactions = 1000,
 
     fingerprint = page.meta?.fingerprint;
     if (!fingerprint || batch.length === 0) break;
-    await sleep(1000);
+    await sleep(pageDelayMs);
   }
 
   transfers.nextFingerprint = fingerprint ?? null;
@@ -126,10 +132,16 @@ export async function getRecentTRC20Transfers(address, { maxTransactions = 1000,
   return transfers;
 }
 
-export async function getRecentUSDTTransfers(address, { maxTransactions = 5000, pageLimit = 200, fingerprint } = {}) {
+export async function getRecentUSDTTransfers(address, {
+  maxTransactions = 5000,
+  pageLimit = 200,
+  pageDelayMs = 1000,
+  fingerprint,
+} = {}) {
   return getRecentTRC20Transfers(address, {
     maxTransactions,
     pageLimit,
+    pageDelayMs,
     fingerprint,
     contractAddress: USDT_CONTRACT,
   });
