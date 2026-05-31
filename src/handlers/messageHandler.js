@@ -117,8 +117,7 @@ export async function handleMessage(bot, msg) {
 
   const formatResult = validateTRC20(text);
   if (formatResult.valid) {
-    await saveSubscriptions(db);
-    await bot.sendMessage(chatId, checkModeText(text), checkModeOptions(text));
+    await handleWalletCheck(bot, msg, db, user, text, { mode: 'normal' });
     return;
   }
 
@@ -321,7 +320,7 @@ async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
 
     const report = onChainReport(text, fmt, onchain);
     await deleteMessageQuietly(bot, chatId, loading.message_id);
-    await bot.sendMessage(chatId, report, resultWatchOptions(text));
+    await bot.sendMessage(chatId, report, resultWatchOptions(text, { includeDeep: options.mode !== 'deep' }));
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
     await saveSubscriptions(db);
@@ -647,13 +646,22 @@ function walletMessageOptions(watch) {
   };
 }
 
-function resultWatchOptions(address) {
+function resultWatchOptions(address, { includeDeep = true } = {}) {
+  const keyboard = [
+    [
+      { text: 'إضافة هذا العنوان للمتابعة وتنبيه المخاطر', callback_data: `watch_result:${address}` },
+    ],
+  ];
+  if (includeDeep) {
+    keyboard.push([
+      { text: 'فحص عميق - يستغرق وقتا أطول', callback_data: `wallet_check:deep:${address}` },
+    ]);
+  }
+
   return {
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [[
-        { text: 'إضافة هذا العنوان للمتابعة وتنبيه المخاطر', callback_data: `watch_result:${address}` },
-      ]],
+      inline_keyboard: keyboard,
     },
   };
 }
