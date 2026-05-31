@@ -310,6 +310,7 @@ async function loadLocalRisk(address, { excludeBlacklistedAddress = null } = {})
   const filteredEdges = [];
   for (const edge of risk.blacklistedEdges) {
     const riskyAddress = edge.blacklistedAddress ?? edge.counterparty ?? (edge.from === address ? edge.to : edge.from);
+    if (riskyAddress === address) continue;
     if (excludeBlacklistedAddress && riskyAddress === excludeBlacklistedAddress) continue;
     if (await getTrustedEntity(riskyAddress)) continue;
     filteredEdges.push(edge);
