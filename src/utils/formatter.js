@@ -134,6 +134,7 @@ function collectRiskEvents(address, onchain) {
     amount: item.amount,
     token: item.token ?? 'USDT',
     counterparty: item.counterparty,
+    txid: item.txid,
   }));
 
   const indirect = (onchain.indirectRiskInteractions ?? []).map(item => ({
@@ -143,6 +144,7 @@ function collectRiskEvents(address, onchain) {
     amount: item.amount,
     token: item.token ?? 'USDT',
     counterparty: item.counterparty,
+    txid: item.txid,
   }));
 
   const includeLocalRiskEvents = !onchain.trustedEntity && onchain.blacklisted !== true;
@@ -153,6 +155,7 @@ function collectRiskEvents(address, onchain) {
     amount: item.amount,
     token: item.token ?? 'USDT',
     counterparty: item.blacklistedAddress ?? (item.from === address ? item.to : item.from),
+    txid: item.txid,
   }));
 
   const seen = new Set();
@@ -173,7 +176,8 @@ function formatEvents(events, fmtNumber, trusted = null) {
     const date = item.timestamp ? formatUtcDate(item.timestamp) : (item.date ?? 'وقت غير معروف');
     const marker = item.kind === 'indirect' ? '🟠' : '🔴';
     const label = item.kind === 'indirect' ? '⚠️' : '❌';
-    return `${marker} ${date}: ${label} *${fmtNumber(item.amount, 2)} ${item.token ?? 'USDT'}*`;
+    const details = item.txid ? ` — [التفاصيل](https://tronscan.org/#/transaction/${item.txid})` : '';
+    return `${marker} ${date}: ${label} *${fmtNumber(item.amount, 2)} ${item.token ?? 'USDT'}*${details}`;
   });
 }
 
