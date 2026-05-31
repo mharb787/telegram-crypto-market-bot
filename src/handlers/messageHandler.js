@@ -666,6 +666,7 @@ function resultWatchOptions(address, { includeDeep = true } = {}) {
 
   return {
     parse_mode: 'Markdown',
+    disable_web_page_preview: true,
     reply_markup: {
       inline_keyboard: keyboard,
     },
