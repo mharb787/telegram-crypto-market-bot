@@ -321,7 +321,7 @@ async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
     await recordUsage(msg, text, onchain);
     logger.info(`On-chain check done — risk:${onchain.risk} addr:${text}`);
 
-    const report = onChainReport(text, fmt, onchain);
+    const report = onChainReport(text, fmt, onchain, { mode: options.mode });
     await deleteMessageQuietly(bot, chatId, loading.message_id);
     if (options.replaceMessageId) {
       await deleteMessageQuietly(bot, chatId, options.replaceMessageId);

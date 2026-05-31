@@ -20,7 +20,7 @@ export function loadingMessage(address) {
   ]);
 }
 
-export function onChainReport(address, fmtNumber, onchain) {
+export function onChainReport(address, fmtNumber, onchain, options = {}) {
   const localCount = onchain.blacklisted === true ? 0 : (onchain.localRisk?.blacklistedInteractionCount ?? 0);
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
   const indirectCount = onchain.indirectRiskInteractions?.length ?? 0;
@@ -31,7 +31,7 @@ export function onChainReport(address, fmtNumber, onchain) {
   const avgTxsPerDay = ageDays > 0 ? (onchain.totalTransactions ?? 0) / ageDays : 0;
 
   return rtlLines([
-    '📋 *نتيجة فحص المحفظة*',
+    `📋 *نتيجة فحص المحفظة${options.mode === 'deep' ? ' (عميق)' : ''}*`,
     '',
     '*الشبكة:* TRON',
     `*العنوان:* \`${address}\``,
