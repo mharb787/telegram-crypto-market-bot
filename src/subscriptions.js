@@ -60,11 +60,22 @@ export function isSubscribed(user, nowMs = Date.now()) {
   return Boolean(user?.subscription?.expiresAt && Date.parse(user.subscription.expiresAt) > nowMs);
 }
 
+export function hasUnlimitedSearches(user) {
+  return user?.usage?.unlimitedSearches === true || user?.subscription?.unlimitedSearches === true;
+}
+
 export function getPlan(user) {
+  if (hasUnlimitedSearches(user)) return 'unlimited';
   return isSubscribed(user) ? 'paid' : 'free';
 }
 
 export function getSearchAllowance(user, now = new Date()) {
+  if (hasUnlimitedSearches(user)) {
+    const key = dayKey(now);
+    const used = user.usage?.unlimitedDayKey === key ? Number(user.usage.unlimitedDayCount ?? 0) : 0;
+    return { plan: 'unlimited', limit: null, used, remaining: Number.POSITIVE_INFINITY, period: 'مفتوح' };
+  }
+
   if (isSubscribed(user, now.getTime())) {
     const key = dayKey(now);
     const used = user.usage?.paidDayKey === key ? Number(user.usage.paidDayCount ?? 0) : 0;
@@ -83,6 +94,16 @@ export function canSearch(user, now = new Date()) {
 
 export function consumeSearch(user, now = new Date()) {
   user.usage ??= {};
+  if (hasUnlimitedSearches(user)) {
+    const key = dayKey(now);
+    if (user.usage.unlimitedDayKey !== key) {
+      user.usage.unlimitedDayKey = key;
+      user.usage.unlimitedDayCount = 0;
+    }
+    user.usage.unlimitedDayCount = Number(user.usage.unlimitedDayCount ?? 0) + 1;
+    return;
+  }
+
   if (isSubscribed(user, now.getTime())) {
     const key = dayKey(now);
     if (user.usage.paidDayKey !== key) {

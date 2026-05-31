@@ -582,11 +582,16 @@ function accountText(user) {
   return [
     '👤 حسابي',
     '',
-    `الخطة: ${isSubscribed(user) ? 'مشترك' : 'مجاني'}`,
+    `الخطة: ${allowance.plan === 'unlimited' ? 'مفتوح' : isSubscribed(user) ? 'مشترك' : 'مجاني'}`,
     `ينتهي الاشتراك: ${isSubscribed(user) ? expires : '-'}`,
-    `الفحوصات: ${allowance.used}/${allowance.limit} ${allowance.period}`,
+    `الفحوصات: ${formatAllowance(allowance)}`,
     `محافظ المتابعة: ${(user.watches ?? []).length}/${watchLimit()}`,
   ].join('\n');
+}
+
+function formatAllowance(allowance) {
+  if (allowance.plan === 'unlimited') return `${allowance.used}/مفتوح`;
+  return `${allowance.used}/${allowance.limit} ${allowance.period}`;
 }
 
 async function sendWatchedWallets(bot, chatId, user) {
