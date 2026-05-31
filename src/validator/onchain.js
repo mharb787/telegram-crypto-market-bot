@@ -251,7 +251,7 @@ async function findIndirectRiskInteractions(address, transfers, bannedCounterpar
     if (seen.has(interaction.counterparty)) continue;
     if (await getTrustedEntity(interaction.counterparty)) continue;
 
-    const risk = await loadLocalRisk(interaction.counterparty);
+    const risk = await loadLocalRisk(interaction.counterparty, { excludeBlacklistedAddress: address });
     if (risk.isBlacklisted === true) continue;
     if (risk.blacklistedInteractionCount <= 0) continue;
 
@@ -304,12 +304,13 @@ function getCounterparty(address, tx) {
   return null;
 }
 
-async function loadLocalRisk(address) {
+async function loadLocalRisk(address, { excludeBlacklistedAddress = null } = {}) {
   const db = await loadRiskDb();
   const risk = getLocalRiskForAddress(db, address);
   const filteredEdges = [];
   for (const edge of risk.blacklistedEdges) {
     const riskyAddress = edge.blacklistedAddress ?? edge.counterparty ?? (edge.from === address ? edge.to : edge.from);
+    if (excludeBlacklistedAddress && riskyAddress === excludeBlacklistedAddress) continue;
     if (await getTrustedEntity(riskyAddress)) continue;
     filteredEdges.push(edge);
   }
