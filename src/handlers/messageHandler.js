@@ -205,7 +205,10 @@ export async function handleCallback(bot, query) {
       await bot.sendMessage(msg.chat.id, deepCheckPaywallText(), subscribeNowOptions());
       return;
     }
-    await handleWalletCheck(bot, { ...msg, text: address, from: query.from }, db, user, address, { mode });
+    await handleWalletCheck(bot, { ...msg, text: address, from: query.from }, db, user, address, {
+      mode,
+      replaceMessageId: mode === 'deep' ? msg.message_id : null,
+    });
     return;
   }
 
@@ -320,6 +323,9 @@ async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
 
     const report = onChainReport(text, fmt, onchain);
     await deleteMessageQuietly(bot, chatId, loading.message_id);
+    if (options.replaceMessageId) {
+      await deleteMessageQuietly(bot, chatId, options.replaceMessageId);
+    }
     await bot.sendMessage(chatId, report, resultWatchOptions(text, { includeDeep: options.mode !== 'deep' }));
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
