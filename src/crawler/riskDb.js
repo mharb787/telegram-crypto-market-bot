@@ -23,19 +23,24 @@ export async function saveRiskDb(db) {
 }
 
 export function upsertAddress(db, address, patch) {
+  const now = new Date().toISOString();
   const current = db.addresses[address] ?? {
     address,
     isBlacklisted: null,
     sources: [],
-    firstSeen: new Date().toISOString(),
+    firstSeen: now,
     lastChecked: null,
     lastScanned: null,
   };
 
   const sources = new Set([...(current.sources ?? []), ...(patch.sources ?? [])]);
+  const blacklistedAt = patch.isBlacklisted === true && current.isBlacklisted !== true
+    ? (current.blacklistedAt ?? now)
+    : current.blacklistedAt;
   db.addresses[address] = {
     ...current,
     ...patch,
+    blacklistedAt,
     sources: [...sources],
   };
 

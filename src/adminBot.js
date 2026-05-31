@@ -156,7 +156,7 @@ bot.onText(/^\/blocked/, async (msg) => {
   const db = await loadRiskDb();
   const blocked = Object.values(db.addresses ?? {})
     .filter(item => item.isBlacklisted === true)
-    .sort((a, b) => (b.lastChecked ?? b.firstSeen ?? '').localeCompare(a.lastChecked ?? a.firstSeen ?? ''))
+    .sort((a, b) => blockedAddedAt(b).localeCompare(blockedAddedAt(a)))
     .slice(0, maxListItems);
 
   await bot.sendMessage(
@@ -561,7 +561,7 @@ function formatStats(db, usage = null, subs = null) {
   const unblocked = addresses.filter(item => item.wasBlacklisted === true && item.isBlacklisted === false);
   const blacklistedEdges = Object.values(db.edges ?? {}).filter(edge => edge.blacklistedAddress);
   const recentBlocked = blocked
-    .sort((a, b) => (b.lastChecked ?? b.firstSeen ?? '').localeCompare(a.lastChecked ?? a.firstSeen ?? ''))
+    .sort((a, b) => blockedAddedAt(b).localeCompare(blockedAddedAt(a)))
     .slice(0, 5)
     .map(item => `• <code>${item.address}</code>`)
     .join('\n') || '• لا يوجد';
@@ -640,10 +640,14 @@ function formatQueueList(title, items) {
 function formatBlockedList(items) {
   if (items.length === 0) return '<b>العناوين المحظورة</b>\n\nلا يوجد عناوين محظورة مخزنة.';
   return [
-    '<b>آخر العناوين المحظورة</b>',
+    '<b>آخر العناوين المضافة للقائمة السوداء</b>',
     '',
-    ...items.map((item, index) => `${index + 1}. <code>${item.address}</code>\nآخر فحص: <code>${shortDate(item.lastChecked ?? item.firstSeen)}</code>`),
+    ...items.map((item, index) => `${index + 1}. <code>${item.address}</code>\nتاريخ الإضافة: <code>${shortDate(blockedAddedAt(item))}</code>`),
   ].join('\n');
+}
+
+function blockedAddedAt(item) {
+  return item.blacklistedAt ?? item.firstSeen ?? '';
 }
 
 function formatTrustedList(items) {
