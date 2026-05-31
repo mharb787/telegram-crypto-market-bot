@@ -21,7 +21,7 @@ export function loadingMessage(address) {
 }
 
 export function onChainReport(address, fmtNumber, onchain) {
-  const localCount = onchain.localRisk?.blacklistedInteractionCount ?? 0;
+  const localCount = onchain.blacklisted === true ? 0 : (onchain.localRisk?.blacklistedInteractionCount ?? 0);
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
   const indirectCount = onchain.indirectRiskInteractions?.length ?? 0;
   const trusted = onchain.blacklisted === true ? null : onchain.trustedEntity;
@@ -128,6 +128,7 @@ function usdtScopeNote(onchain, blacklistTxCount) {
 
 function collectRiskEvents(address, onchain) {
   const direct = (onchain.blacklistedInteractions ?? []).map(item => ({
+    kind: 'direct',
     timestamp: item.timestamp ?? parseDate(item.date),
     date: item.date,
     amount: item.amount,
@@ -135,7 +136,18 @@ function collectRiskEvents(address, onchain) {
     counterparty: item.counterparty,
   }));
 
-  const local = (onchain.trustedEntity ? [] : (onchain.localRisk?.blacklistedInteractions ?? [])).map(item => ({
+  const indirect = (onchain.indirectRiskInteractions ?? []).map(item => ({
+    kind: 'indirect',
+    timestamp: item.timestamp ?? parseDate(item.date),
+    date: item.date,
+    amount: item.amount,
+    token: item.token ?? 'USDT',
+    counterparty: item.counterparty,
+  }));
+
+  const includeLocalRiskEvents = !onchain.trustedEntity && onchain.blacklisted !== true;
+  const local = (includeLocalRiskEvents ? (onchain.localRisk?.blacklistedInteractions ?? []) : []).map(item => ({
+    kind: 'direct',
     timestamp: item.timestamp ?? parseDate(item.date),
     date: item.date,
     amount: item.amount,
@@ -144,7 +156,7 @@ function collectRiskEvents(address, onchain) {
   }));
 
   const seen = new Set();
-  return [...direct, ...local]
+  return [...direct, ...indirect, ...local]
     .filter(item => {
       const key = `${item.timestamp}:${item.amount}:${item.counterparty}`;
       if (seen.has(key)) return false;
@@ -156,10 +168,12 @@ function collectRiskEvents(address, onchain) {
 
 function formatEvents(events, fmtNumber, trusted = null) {
   if (trusted) return ['غير مطبق على عناوين المنصات المركزية.'];
-  if (events.length === 0) return ['لا توجد أحداث USDT مع عناوين محظورة ضمن البيانات الحالية.'];
+  if (events.length === 0) return ['لا توجد أحداث USDT مع عناوين مقابلة محظورة أو عالية الخطورة ضمن الفحص الحالي.'];
   return events.map(item => {
     const date = item.timestamp ? formatUtcDate(item.timestamp) : (item.date ?? 'وقت غير معروف');
-    return `🔴 ${date}: ❌ *${fmtNumber(item.amount, 2)} ${item.token ?? 'USDT'}*`;
+    const marker = item.kind === 'indirect' ? '🟠' : '🔴';
+    const label = item.kind === 'indirect' ? '⚠️' : '❌';
+    return `${marker} ${date}: ${label} *${fmtNumber(item.amount, 2)} ${item.token ?? 'USDT'}*`;
   });
 }
 
