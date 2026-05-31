@@ -62,6 +62,7 @@ await bot.setMyCommands([
   { command: 'status', description: 'حالة القاعدة والطابور' },
   { command: 'stats', description: 'إحصائيات مختصرة كاملة' },
   { command: 'subs', description: 'إحصائيات الاشتراكات والمدفوعات' },
+  { command: 'grant', description: 'منح اشتراك 30 يوم' },
   { command: 'watches', description: 'كل محافظ المتابعة وحالة فحصها' },
   { command: 'add', description: 'إضافة بذور' },
   { command: 'pending', description: 'العناوين المنتظرة' },
@@ -105,6 +106,18 @@ bot.onText(/^\/subs/, async (msg) => {
   if (!isAllowed(msg)) return;
   const subs = await loadSubscriptions();
   await bot.sendMessage(msg.chat.id, formatSubscriptionStats(subs), adminHtml);
+});
+
+bot.onText(/^\/grant(?:\s+(\S+))?/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const query = match?.[1]?.trim();
+  if (!query) {
+    await bot.sendMessage(msg.chat.id, 'استخدم:\n<code>/grant USERNAME_OR_TELEGRAM_ID</code>\n\nمثال:\n<code>/grant @gulfex</code>\n<code>/grant 5331781669</code>', adminHtml);
+    return;
+  }
+
+  const result = await grantSubscription(query, msg.from?.id ?? msg.chat.id);
+  await bot.sendMessage(msg.chat.id, formatGrantResult(result, query), adminHtml);
 });
 
 bot.onText(/^\/watches/, async (msg) => {
@@ -412,6 +425,60 @@ async function addSeeds(input) {
   return { added, existing, invalid };
 }
 
+async function grantSubscription(query, adminId) {
+  const subs = await loadSubscriptions();
+  const usage = await loadUsageLog();
+  const user = findSubscriptionUser(subs, usage, query);
+  if (!user) return { ok: false, reason: 'not_found' };
+
+  const now = Date.now();
+  const currentExpiry = Date.parse(user.subscription?.expiresAt ?? '');
+  const base = Number.isFinite(currentExpiry) && currentExpiry > now ? currentExpiry : now;
+  const startedAt = user.subscription?.startedAt ?? new Date(now).toISOString();
+  const expiresAt = new Date(base + 30 * 86_400_000).toISOString();
+  user.subscription = {
+    status: 'active',
+    startedAt,
+    expiresAt,
+    reminders: {},
+    grantedBy: String(adminId ?? 'admin'),
+    grantedAt: new Date(now).toISOString(),
+  };
+  user.pendingPaymentId = null;
+  user.state = null;
+  await saveSubscriptions(subs);
+  return { ok: true, user, expiresAt };
+}
+
+function findSubscriptionUser(subs, usage, query) {
+  const normalized = normalizeUserQuery(query);
+  if (!normalized) return null;
+
+  const users = subs.users ?? {};
+  if (users[normalized]) return users[normalized];
+
+  const usageUser = Object.values(usage.users ?? {}).find(user =>
+    normalizeUserQuery(user.userId) === normalized ||
+    normalizeUserQuery(user.username) === normalized ||
+    normalizeUserQuery(user.chatId) === normalized
+  );
+  if (usageUser?.userId && users[String(usageUser.userId)]) return users[String(usageUser.userId)];
+
+  return Object.values(users).find(user =>
+    normalizeUserQuery(user.userId) === normalized ||
+    normalizeUserQuery(user.username) === normalized ||
+    normalizeUserQuery(user.chatId) === normalized ||
+    normalizeUserQuery(user.name) === normalized
+  ) ?? null;
+}
+
+function normalizeUserQuery(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^@/, '')
+    .toLowerCase();
+}
+
 async function checkUnbannedAddresses() {
   if (unbanMonitorRunning) {
     return { checked: 0, unbanned: [], errors: [], skipped: 'الفحص يعمل حاليا' };
@@ -626,6 +693,29 @@ function formatAddResult({ added, existing, invalid }) {
   if (invalid.length) lines.push('', '<b>غير الصالحة</b>', ...invalid.slice(0, maxListItems).map(addr => `<code>${addr}</code>`));
 
   return lines.join('\n');
+}
+
+function formatGrantResult(result, query) {
+  if (!result.ok) {
+    return [
+      '<b>منح اشتراك</b>',
+      '',
+      `لم أجد مستخدماً مطابقاً: <code>${escapeHtml(query)}</code>`,
+      '',
+      'يجب أن يكون المستخدم قد فتح البوت مرة واحدة على الأقل.',
+    ].join('\n');
+  }
+
+  const user = result.user;
+  return [
+    '<b>تم تفعيل الاشتراك</b>',
+    '',
+    `المستخدم: <code>${escapeHtml(user.userId)}</code>`,
+    `الاسم: ${escapeHtml(displayUser(user))}`,
+    `ينتهي: <code>${shortDate(result.expiresAt)}</code>`,
+    '',
+    'المدة: 30 يوم',
+  ].join('\n');
 }
 
 function formatQueueList(title, items) {
@@ -1164,6 +1254,7 @@ function helpText() {
     '<code>/status</code> حالة القاعدة والطابور',
     '<code>/stats</code> إحصائيات مختصرة كاملة',
     '<code>/subs</code> إحصائيات الاشتراكات والمدفوعات',
+    '<code>/grant USERNAME_OR_ID</code> منح اشتراك 30 يوم',
     '<code>/watches</code> كل محافظ المتابعة وحالة فحصها',
     '<code>/add T...</code> إضافة بذور',
     '<code>/pending</code> العناوين المنتظرة',
