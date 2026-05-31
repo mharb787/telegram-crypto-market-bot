@@ -80,7 +80,12 @@ export async function checkOnChain(address, options = {}) {
   const auditTransfers = usdtTransfers.filter(tx => transferAmount(tx) >= minAuditUsdt);
   const counterparties = await filterUntrustedCounterparties(uniqueCounterparties(address, auditTransfers));
   const local = localRisk.status === 'fulfilled' ? localRisk.value : null;
-  const shouldAuditCounterparties = !trustedEntity && (options.forceCounterpartyAudit || VERIFY_COUNTERPARTIES_WITH_TETHER || !local?.blacklistedInteractionCount);
+  const shouldAuditCounterparties = !trustedEntity && (
+    isBanned === true ||
+    options.forceCounterpartyAudit ||
+    VERIFY_COUNTERPARTIES_WITH_TETHER ||
+    !local?.blacklistedInteractionCount
+  );
   const blacklistAudit = shouldAuditCounterparties
     ? await auditBlacklistedCounterparties(address, auditTransfers, counterparties)
     : { bannedCounterparties: [], interactions: [], unknownCounterparties: [] };
