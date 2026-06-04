@@ -12,7 +12,7 @@ import {
 } from './crawler/riskDb.js';
 import { checkBlacklistConstantContract, isBlacklistedByTether } from './api/trongrid.js';
 import { loadUsageLog } from './usageLog.js';
-import { loadSubscriptions } from './subscriptions.js';
+import { loadSubscriptions, saveSubscriptions } from './subscriptions.js';
 import { listTrustedEntities, removeTrustedEntity, upsertTrustedEntity } from './trustedEntities.js';
 import { logger } from './utils/logger.js';
 
@@ -117,6 +117,9 @@ bot.onText(/^\/grant(?:\s+(\S+))?/, async (msg, match) => {
   }
 
   const result = await grantSubscription(query, msg.from?.id ?? msg.chat.id);
+  if (result.ok) {
+    result.notification = await notifyGrantedSubscription(result.user, result.expiresAt);
+  }
   await bot.sendMessage(msg.chat.id, formatGrantResult(result, query), adminHtml);
 });
 
@@ -450,6 +453,30 @@ async function grantSubscription(query, adminId) {
   return { ok: true, user, expiresAt };
 }
 
+async function notifyGrantedSubscription(user, expiresAt) {
+  if (!userBot) return { ok: false, reason: 'user_bot_unavailable' };
+  const chatId = user.chatId ?? user.userId;
+  if (!chatId) return { ok: false, reason: 'missing_chat_id' };
+
+  try {
+    await userBot.sendMessage(
+      chatId,
+      [
+        '✅ تم تفعيل اشتراكك بنجاح.',
+        '',
+        'تم منحك اشتراكاً لمدة 30 يوم من قبل الإدارة.',
+        `ينتهي الاشتراك: ${shortDate(expiresAt)}`,
+        '',
+        'يمكنك الآن استخدام الفحص العميق ومتابعة مخاطر المحافظ.',
+      ].join('\n')
+    );
+    return { ok: true };
+  } catch (err) {
+    logger.warn(`Grant subscription notify failed for ${user.userId}: ${err.message}`);
+    return { ok: false, reason: err.message };
+  }
+}
+
 function findSubscriptionUser(subs, usage, query) {
   const normalized = normalizeUserQuery(query);
   if (!normalized) return null;
@@ -713,6 +740,7 @@ function formatGrantResult(result, query) {
     `المستخدم: <code>${escapeHtml(user.userId)}</code>`,
     `الاسم: ${escapeHtml(displayUser(user))}`,
     `ينتهي: <code>${shortDate(result.expiresAt)}</code>`,
+    `تنبيه المستخدم: ${result.notification?.ok ? 'تم الإرسال' : `لم يرسل (${escapeHtml(result.notification?.reason ?? 'غير معروف')})`}`,
     '',
     'المدة: 30 يوم',
   ].join('\n');
