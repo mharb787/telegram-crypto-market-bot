@@ -1,4 +1,5 @@
 ﻿import 'dotenv/config';
+import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { URL } from 'node:url';
 import TelegramBot from 'node-telegram-bot-api';
@@ -19,6 +20,7 @@ const userBot = process.env.TELEGRAM_BOT_TOKEN
   : null;
 const broadcastDelayMs = Math.max(50, Number(process.env.ADMIN_BROADCAST_DELAY_MS) || 120);
 let unbanCheckRunning = false;
+let tetherBackfillProcess = null;
 
 if (!token || token.length < 16) {
   logger.error('ADMIN_WEB_TOKEN is missing or too short. Refusing to start admin web.');
@@ -81,6 +83,10 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       return sendJson(res, 200, { ok: true, data: await checkUnbannedAddresses(Number(body.limit) || 50) });
     }
+    if (req.method === 'POST' && url.pathname === '/api/tether-backfill') {
+      const body = await readBody(req);
+      return sendJson(res, 200, { ok: true, data: await startTetherBackfill(body) });
+    }
 
     return sendJson(res, 404, { ok: false, error: 'not_found' });
   } catch (err) {
@@ -94,12 +100,13 @@ server.listen(port, host, () => {
 });
 
 async function buildDashboardData(params) {
-  const [riskDb, usage, subs, trusted, tetherWatcherState] = await Promise.all([
+  const [riskDb, usage, subs, trusted, tetherWatcherState, tetherBackfillState] = await Promise.all([
     loadRiskDb(),
     loadUsageLog(),
     loadSubscriptions(),
     listTrustedEntities(),
     loadTetherWatcherState(),
+    loadTetherBackfillState(),
   ]);
   const limit = clamp(Number(params.get('limit')) || 100, 20, 1000);
   const query = String(params.get('q') ?? '').trim().toLowerCase();
@@ -145,7 +152,7 @@ async function buildDashboardData(params) {
       .filter(item => matchesQuery(item, query))
       .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
       .slice(0, limit),
-    tetherWatcher: buildTetherWatcherData(riskDb, tetherWatcherState, limit),
+    tetherWatcher: buildTetherWatcherData(riskDb, tetherWatcherState, tetherBackfillState, limit),
     events: (usage.events ?? [])
       .filter(item => matchesQuery(item, query))
       .slice(-limit)
@@ -162,9 +169,20 @@ async function loadTetherWatcherState() {
   });
 }
 
-function buildTetherWatcherData(riskDb, state, limit) {
+async function loadTetherBackfillState() {
+  return readJson('tether-blacklist-backfill.json', {
+    phase: 'AddedBlackList',
+    fingerprint: null,
+    fromTimestamp: null,
+    completed: false,
+    totals: { added: 0, removed: 0 },
+    updatedAt: null,
+  });
+}
+
+function buildTetherWatcherData(riskDb, state, backfill, limit) {
   const addresses = Object.values(riskDb.addresses ?? {})
-    .filter(item => (item.sources ?? []).includes('tether_event'))
+    .filter(item => (item.sources ?? []).includes('tether_event') || (item.sources ?? []).includes('tether_event_history'))
     .sort((a, b) => dateValue(tetherEventAt(b)) - dateValue(tetherEventAt(a)));
   const todayKey = new Date().toISOString().slice(0, 10);
   const today = addresses.filter(item => String(tetherEventAt(item) ?? '').startsWith(todayKey));
@@ -182,6 +200,14 @@ function buildTetherWatcherData(riskDb, state, limit) {
     addedToday: today.length,
     latestAdded: addresses.slice(0, limit),
     latestRemoved: removed,
+    backfill: {
+      running: Boolean(tetherBackfillProcess && !tetherBackfillProcess.killed),
+      phase: backfill.phase ?? null,
+      completed: Boolean(backfill.completed),
+      updatedAt: backfill.updatedAt ?? null,
+      fromTimestamp: backfill.fromTimestamp ? new Date(Number(backfill.fromTimestamp)).toISOString() : null,
+      totals: backfill.totals ?? { added: 0, removed: 0 },
+    },
   };
 }
 
@@ -417,6 +443,37 @@ async function checkUnbannedAddresses(limit) {
   } finally {
     unbanCheckRunning = false;
   }
+}
+
+async function startTetherBackfill(input = {}) {
+  if (tetherBackfillProcess && !tetherBackfillProcess.killed && tetherBackfillProcess.exitCode == null) {
+    return { started: false, running: true, pid: tetherBackfillProcess.pid };
+  }
+
+  const days = clamp(Number(input.days) || 3650, 1, 10000);
+  const maxPages = clamp(Number(input.maxPages) || 5000, 1, 20000);
+  const child = spawn(process.execPath, [
+    'src/crawler/tetherBlacklistBackfill.js',
+    `--days=${days}`,
+    `--max-pages=${maxPages}`,
+  ], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'ignore',
+    detached: false,
+  });
+
+  tetherBackfillProcess = child;
+  child.on('exit', (code, signal) => {
+    logger.info(`Tether backfill process exited. code:${code} signal:${signal ?? '-'}`);
+    if (tetherBackfillProcess === child) tetherBackfillProcess = null;
+  });
+  child.on('error', (err) => {
+    logger.warn(`Tether backfill process failed to start: ${err.message}`);
+    if (tetherBackfillProcess === child) tetherBackfillProcess = null;
+  });
+
+  return { started: true, running: true, pid: child.pid, days, maxPages };
 }
 
 async function confirmUnbanned(address) {
@@ -714,8 +771,9 @@ function renderTetherWatcher(){
       metricCard('حالة المراقب', w.status, 'آخر دورة: '+fmtDate(w.updatedAt))+
       metricCard('آخر حدث مقروء', fmtDate(w.lastEventAt), 'أحداث محفوظة: '+w.trackedEvents)+
       metricCard('دخلت من Tether', w.totalAdded, 'اليوم: '+w.addedToday)+
-      metricCard('التنبيه', 'تلقائي', 'أي عنوان جديد يصل لبوت المدير')+
+      metricCard('الاستيراد التاريخي', w.backfill.running ? 'يعمل الآن' : (w.backfill.completed ? 'مكتمل' : 'جاهز'), 'أضيف تاريخيا: '+(w.backfill.totals.added||0))+
     '</div>'+
+    '<div class="card"><h3>الاستيراد التاريخي</h3><p class="muted">يستورد أحداث Tether القديمة بصمت بدون إرسال تنبيهات للمدير.</p><button class="btn amber" onclick="startTetherBackfill()">بدء/متابعة الاستيراد التاريخي</button><div class="muted" style="margin-top:10px">منذ: '+fmtDate(w.backfill.fromTimestamp)+' | آخر تحديث: '+fmtDate(w.backfill.updatedAt)+' | المرحلة: '+(w.backfill.phase||'-')+'</div></div>'+
     '<div class="card"><h3>آخر عناوين دخلت قائمة Tether السوداء</h3>'+tableHtml(['العنوان','وقت الحظر','آخر فحص','سبب الإدراج'], w.latestAdded, r => [addr(r.address), fmtDate(tetherAt(r)), fmtDate(r.lastChecked), sourceLabels(r.sources).join('<br>')])+'</div>'+
     '<div class="card"><h3>آخر أحداث رفع الحظر من Tether</h3>'+tableHtml(['العنوان','وقت رفع الحظر','آخر فحص'], w.latestRemoved, r => [addr(r.address), fmtDate(r.unblacklistedAt), fmtDate(r.lastChecked)])+'</div>';
 }
@@ -745,6 +803,8 @@ function sourceLabels(sources){
   const labels = {
     tether_event: 'حظر مباشر من حدث Tether على الشبكة',
     tether_event_removed: 'حدث رفع حظر من Tether',
+    tether_event_history: 'استيراد تاريخي من أحداث Tether',
+    tether_event_history_removed: 'استيراد تاريخي لحدث رفع حظر من Tether',
     user_check: 'اكتشف أثناء فحص مستخدم للعنوان نفسه',
     user_check_counterparty: 'اكتشف كطرف مقابل أثناء فحص مستخدم',
     crawler: 'اكتشفه الزاحف من معاملات عنوان محظور',
@@ -769,6 +829,7 @@ async function trust(){ await api('/api/trusted',{method:'POST',body:JSON.string
 async function untrust(address){ if(!confirm('حذف العنوان من الموثوق؟')) return; await api('/api/trusted/'+encodeURIComponent(address),{method:'DELETE'}); toast('تم الحذف'); loadData(); }
 async function broadcast(){ const text=document.getElementById('broadcastText').value; if(!text.trim()) return toast('اكتب الرسالة أولا'); if(!confirm('تأكيد إرسال الرسالة لكل المستخدمين؟')) return; const data=await api('/api/broadcast',{method:'POST',body:JSON.stringify({text})}); toast('تم: '+(data.sent||0)+' | فشل: '+(data.failed||0)); }
 async function unbanCheck(){ const data=await api('/api/unban-check',{method:'POST',body:JSON.stringify({limit:document.getElementById('unbanLimit').value})}); toast('تم فحص '+data.checked+' | رفع حظر: '+data.unbanned.length+' | أخطاء: '+data.errors.length); loadData(); }
+async function startTetherBackfill(){ const data=await api('/api/tether-backfill',{method:'POST',body:JSON.stringify({days:3650,maxPages:5000})}); toast(data.started?'تم بدء الاستيراد التاريخي':'الاستيراد يعمل بالفعل'); loadData(); }
 function download(path){ window.open(path+'?token='+encodeURIComponent(TOKEN),'_blank'); }
 </script>
 </body>
