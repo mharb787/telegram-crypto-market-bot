@@ -191,11 +191,11 @@ function tetherEventAt(item) {
 
 function watcherStatus(state) {
   const updatedAt = Date.parse(state.updatedAt ?? '');
-  if (!Number.isFinite(updatedAt)) return 'ظ„ظ… ظٹط³ط¬ظ„ ط¯ظˆط±ط© ط¨ط¹ط¯';
+  if (!Number.isFinite(updatedAt)) return 'لم يسجل دورة بعد';
   const ageMs = Date.now() - updatedAt;
-  if (ageMs <= 3 * 60_000) return 'ظٹط¹ظ…ظ„ ط§ظ„ط¢ظ†';
-  if (ageMs <= 15 * 60_000) return 'ظ…طھط£ط®ط± ظ‚ظ„ظٹظ„ط§';
-  return 'ظٹط­طھط§ط¬ ظ…ط±ط§ط¬ط¹ط©';
+  if (ageMs <= 3 * 60_000) return 'يعمل الآن';
+  if (ageMs <= 15 * 60_000) return 'متأخر قليلا';
+  return 'يحتاج مراجعة';
 }
 
 function summarizeAll({ addresses, edges, queue, users, subUsers, payments, alerts, watches, riskDb, usage, subs, trusted }) {
@@ -633,7 +633,7 @@ const tabs = [
   ['overview','ط§ظ„ظ…ظ„ط®طµ'],['tools','ط§ظ„ط£ط¯ظˆط§طھ'],['blocked','ط§ظ„ظ…ط­ط¸ظˆط±ط©'],['queue','ط§ظ„ط·ط§ط¨ظˆط±'],['users','ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†'],
   ['subscriptions','ط§ظ„ط§ط´طھط±ط§ظƒط§طھ'],['watches','ط§ظ„ظ…طھط§ط¨ط¹ط©'],['trusted','ط§ظ„ظ…ظ†طµط§طھ'],['payments','ط§ظ„ظ…ط¯ظپظˆط¹ط§طھ'],['alerts','ط§ظ„طھظ†ط¨ظٹظ‡ط§طھ'],['events','ط³ط¬ظ„ ط§ظ„ط¨ط­ط«'],['details','طھظپط§طµظٹظ„ ط§ظ„ط¨ط­ط«']
 ];
-tabs.splice(8, 0, ['tetherWatcher', 'ظ…ط±ط§ظ‚ط¨ Tether']);
+tabs.splice(8, 0, ['tetherWatcher', 'مراقب Tether']);
 document.getElementById('nav').innerHTML = tabs.map(([id,label]) => '<button data-tab="'+id+'" onclick="showTab(\\''+id+'\\')">'+label+'</button>').join('');
 document.querySelector('[data-tab=overview]').classList.add('active');
 document.getElementById('search').addEventListener('keydown', e => { if(e.key === 'Enter') loadData(); });
@@ -743,20 +743,20 @@ function blockedAt(r){ return r.blacklistedAt || r.tetherBlacklistedAt || r.firs
 function tetherAt(r){ return r.tetherBlacklistedAt || r.blacklistedAt || r.firstSeen || r.lastChecked; }
 function sourceLabels(sources){
   const labels = {
-    tether_event: 'ط­ط¸ط± ظ…ط¨ط§ط´ط± ظ…ظ† ط­ط¯ط« Tether ط¹ظ„ظ‰ ط§ظ„ط´ط¨ظƒط©',
-    tether_event_removed: 'ط­ط¯ط« ط±ظپط¹ ط­ط¸ط± ظ…ظ† Tether',
-    user_check: 'ط§ظƒطھط´ظپ ط£ط«ظ†ط§ط، ظپط­طµ ظ…ط³طھط®ط¯ظ… ظ„ظ„ط¹ظ†ظˆط§ظ† ظ†ظپط³ظ‡',
-    user_check_counterparty: 'ط§ظƒطھط´ظپ ظƒط·ط±ظپ ظ…ظ‚ط§ط¨ظ„ ط£ط«ظ†ط§ط، ظپط­طµ ظ…ط³طھط®ط¯ظ…',
-    crawler: 'ط§ظƒطھط´ظپظ‡ ط§ظ„ط²ط§ط­ظپ ظ…ظ† ظ…ط¹ط§ظ…ظ„ط§طھ ط¹ظ†ظˆط§ظ† ظ…ط­ط¸ظˆط±',
-    crawler_check: 'طھط£ظƒط¯ ظ…ظ†ظ‡ ط§ظ„ط²ط§ط­ظپ ط¹ط¨ط± ظپط­طµ Tether',
-    seed: 'ط¨ط°ط±ط© ط£ظˆظ„ظٹط© ظ„ظ„ظ†ط¸ط§ظ…',
-    admin_seed: 'ط£ط¶ط§ظپظ‡ ط§ظ„ظ…ط¯ظٹط± ظٹط¯ظˆظٹط§ ظ…ظ† ط¨ظˆطھ ط§ظ„ظ…ط¯ظٹط±',
-    admin_web_seed: 'ط£ط¶ط§ظپظ‡ ط§ظ„ظ…ط¯ظٹط± ظٹط¯ظˆظٹط§ ظ…ظ† ظ„ظˆط­ط© ط§ظ„ظˆظٹط¨',
-    unban_monitor: 'ط±ط§ط¬ط¹ظ‡ ظ†ط¸ط§ظ… ظ…طھط§ط¨ط¹ط© ط±ظپط¹ ط§ظ„ط­ط¸ط±',
-    admin_web_unban_check: 'ط±ط§ط¬ط¹ظ‡ ط§ظ„ظ…ط¯ظٹط± ظ…ظ† ظ„ظˆط­ط© ط§ظ„ظˆظٹط¨',
+    tether_event: 'حظر مباشر من حدث Tether على الشبكة',
+    tether_event_removed: 'حدث رفع حظر من Tether',
+    user_check: 'اكتشف أثناء فحص مستخدم للعنوان نفسه',
+    user_check_counterparty: 'اكتشف كطرف مقابل أثناء فحص مستخدم',
+    crawler: 'اكتشفه الزاحف من معاملات عنوان محظور',
+    crawler_check: 'تأكد منه الزاحف عبر فحص Tether',
+    seed: 'بذرة أولية للنظام',
+    admin_seed: 'أضافه المدير يدويا من بوت المدير',
+    admin_web_seed: 'أضافه المدير يدويا من لوحة الويب',
+    unban_monitor: 'راجعه نظام متابعة رفع الحظر',
+    admin_web_unban_check: 'راجعه المدير من لوحة الويب',
   };
-  const list = [...new Set(sources || [])].map(source => labels[source] || ('ظ…طµط¯ط± ط؛ظٹط± ظ…طµظ†ظپ: '+source));
-  return list.length ? list : ['ط؛ظٹط± ظ…ط­ط¯ط¯'];
+  const list = [...new Set(sources || [])].map(source => labels[source] || ('مصدر غير مصنف: '+source));
+  return list.length ? list : ['غير محدد'];
 }
 function short(a){ return a && a.length>14 ? a.slice(0,6)+'...'+a.slice(-6) : a; }
 function fmtDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return esc(v); return d.toLocaleString('en-GB',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
