@@ -12,7 +12,7 @@ import { logger } from './utils/logger.js';
 
 const host = process.env.ADMIN_WEB_HOST || '0.0.0.0';
 const port = Number(process.env.ADMIN_WEB_PORT) || 3080;
-const token = process.env.ADMIN_WEB_TOKEN;
+const token = String(process.env.ADMIN_WEB_TOKEN ?? '').trim();
 const userBot = process.env.TELEGRAM_BOT_TOKEN
   ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false })
   : null;
@@ -486,8 +486,10 @@ function clamp(value, min, max) {
 
 function isAuthorized(req, url) {
   const header = req.headers.authorization ?? '';
-  const bearer = header.startsWith('Bearer ') ? header.slice(7) : null;
-  return bearer === token || url.searchParams.get('token') === token;
+  const bearer = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
+  const headerToken = String(req.headers['x-admin-token'] ?? '').trim();
+  const queryToken = String(url.searchParams.get('token') ?? '').trim();
+  return bearer === token || headerToken === token || queryToken === token;
 }
 
 async function readBody(req) {
