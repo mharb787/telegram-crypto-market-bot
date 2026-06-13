@@ -20,6 +20,7 @@ const POLL_MS = Math.max(15_000, Number(process.env.TETHER_WATCHER_POLL_MS) || 6
 const INITIAL_LOOKBACK_MS = Math.max(60_000, Number(process.env.TETHER_WATCHER_INITIAL_LOOKBACK_MS) || 10 * 60_000);
 const OVERLAP_MS = Math.max(0, Number(process.env.TETHER_WATCHER_OVERLAP_MS) || 60_000);
 const EVENT_LIMIT = Math.min(200, Math.max(20, Number(process.env.TETHER_WATCHER_EVENT_LIMIT) || 200));
+const REQUEST_DELAY_MS = Math.max(0, Number(process.env.TETHER_WATCHER_REQUEST_DELAY_MS) || 1000);
 const ONCE = process.argv.includes('--once') || process.env.TETHER_WATCHER_ONCE === 'true';
 const adminChatIds = parseIdList(process.env.ADMIN_CHAT_IDS);
 const bot = process.env.ADMIN_BOT_TOKEN ? new TelegramBot(process.env.ADMIN_BOT_TOKEN, { polling: false }) : null;
@@ -53,6 +54,7 @@ async function runOnce() {
   const from = Math.max(0, Number(state.lastTimestamp ?? (Date.now() - INITIAL_LOOKBACK_MS)) - OVERLAP_MS);
   const seen = new Set(state.seenEventIds ?? []);
   const addedEvents = await fetchEvents('AddedBlackList', from);
+  if (REQUEST_DELAY_MS > 0) await delay(REQUEST_DELAY_MS);
   const removedEvents = await fetchEvents('RemovedBlackList', from);
   const allEvents = [...addedEvents, ...removedEvents]
     .sort((a, b) => Number(a.block_timestamp ?? 0) - Number(b.block_timestamp ?? 0));
@@ -134,7 +136,7 @@ async function fetchEvents(eventName, minTimestamp) {
   const events = [];
   let fingerprint = null;
   do {
-    const page = await getContractEvents(USDT_CONTRACT, {
+    const page = await getContractEventsWithRetry(USDT_CONTRACT, {
       eventName,
       minTimestamp,
       onlyConfirmed: true,
@@ -145,8 +147,26 @@ async function fetchEvents(eventName, minTimestamp) {
     const batch = page.data ?? [];
     events.push(...batch);
     fingerprint = page.meta?.fingerprint ?? null;
+    if (fingerprint && REQUEST_DELAY_MS > 0) await delay(REQUEST_DELAY_MS);
   } while (fingerprint && events.length < 2000);
   return events;
+}
+
+async function getContractEventsWithRetry(address, options) {
+  const delays = [0, 3000, 8000, 15000];
+  let lastError = null;
+  for (const waitMs of delays) {
+    if (waitMs > 0) await delay(waitMs);
+    try {
+      return await getContractEvents(address, options);
+    } catch (err) {
+      lastError = err;
+      const isRateLimited = /HTTP 429/.test(err.message);
+      if (!isRateLimited) throw err;
+      logger.warn(`Tether event request rate limited; retrying after backoff: ${err.message}`);
+    }
+  }
+  throw lastError;
 }
 
 async function verifyBlacklisted(address) {
