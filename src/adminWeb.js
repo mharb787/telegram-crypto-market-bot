@@ -61,7 +61,7 @@ const server = http.createServer(async (req, res) => {
       const validation = validateTRC20(address);
       if (!validation.valid) return sendJson(res, 400, { ok: false, error: 'invalid_address' });
       const entity = await upsertTrustedEntity(address, {
-        name: String(body.name ?? '').trim() || 'ظ…ظ†طµط© ظ…ط±ظƒط²ظٹط©',
+        name: String(body.name ?? '').trim() || 'منصة مركزية',
         type: 'platform',
         source: 'admin_web',
         reason: 'manual_admin_web',
@@ -336,12 +336,12 @@ async function notifyGrantedSubscription(user, expiresAt) {
   if (!chatId) return { ok: false, reason: 'missing_chat_id' };
   try {
     await userBot.sendMessage(chatId, [
-      'âœ… طھظ… طھظپط¹ظٹظ„ ط§ط´طھط±ط§ظƒظƒ ط¨ظ†ط¬ط§ط­.',
+      '✅ تم تفعيل اشتراكك بنجاح.',
       '',
-      'طھظ… ظ…ظ†ط­ظƒ ط§ط´طھط±ط§ظƒط§ ظ„ظ…ط¯ط© 30 ظٹظˆظ… ظ…ظ† ظ‚ط¨ظ„ ط§ظ„ط¥ط¯ط§ط±ط©.',
-      `ظٹظ†طھظ‡ظٹ ط§ظ„ط§ط´طھط±ط§ظƒ: ${shortDate(expiresAt)}`,
+      'تم منحك اشتراكا لمدة 30 يوم من قبل الإدارة.',
+      `ينتهي الاشتراك: ${shortDate(expiresAt)}`,
       '',
-      'ظٹظ…ظƒظ†ظƒ ط§ظ„ط¢ظ† ط§ط³طھط®ط¯ط§ظ… ط§ظ„ظپط­طµ ط§ظ„ط¹ظ…ظٹظ‚ ظˆظ…طھط§ط¨ط¹ط© ظ…ط®ط§ط·ط± ط§ظ„ظ…ط­ط§ظپط¸.',
+      'يمكنك الآن استخدام الفحص العميق ومتابعة مخاطر المحافظ.',
     ].join('\n'));
     return { ok: true };
   } catch (err) {
@@ -369,7 +369,7 @@ async function sendBroadcast(text) {
 }
 
 async function checkUnbannedAddresses(limit) {
-  if (unbanCheckRunning) return { checked: 0, unbanned: [], errors: [], skipped: 'ط§ظ„ظپط­طµ ظٹط¹ظ…ظ„ ط­ط§ظ„ظٹط§' };
+  if (unbanCheckRunning) return { checked: 0, unbanned: [], errors: [], skipped: 'الفحص يعمل حاليا' };
   unbanCheckRunning = true;
   try {
     const db = await loadRiskDb();
@@ -580,7 +580,7 @@ const HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ظ„ظˆط­ط© ظ…ط¯ظٹط± ط¢ظ…ظ†</title>
+<title>لوحة مدير آمن</title>
 <style>
 :root{--bg:#f5f7fb;--panel:#fff;--ink:#132033;--muted:#6b7280;--line:#dfe5ee;--blue:#2563eb;--red:#dc2626;--amber:#d97706;--green:#059669;--shadow:0 10px 30px rgba(15,23,42,.08)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Tahoma,Arial,sans-serif;font-size:14px}button,input,textarea,select{font:inherit}
@@ -596,15 +596,15 @@ a{color:#2563eb;text-decoration:none}.toast{position:fixed;left:18px;bottom:18px
 <body>
 <div class="app">
   <aside class="side">
-    <div class="brand">ط¢ظ…ظ† | ظ„ظˆط­ط© ط§ظ„ظ…ط¯ظٹط±</div>
+    <div class="brand">آمن | لوحة المدير</div>
     <div class="nav" id="nav"></div>
   </aside>
   <main class="main">
     <div class="top">
       <div class="search">
-        <input id="search" placeholder="ط¨ط­ط«: ط¹ظ†ظˆط§ظ†طŒ ظٹظˆط²ط±طŒ IDطŒ ط­ط§ظ„ط© ط¯ظپط¹...">
+        <input id="search" placeholder="بحث: عنوان، يوزر، ID، حالة دفع...">
         <select id="limit"><option>100</option><option>250</option><option>500</option><option>1000</option></select>
-        <button class="btn" onclick="loadData()">طھط­ط¯ظٹط«</button>
+        <button class="btn" onclick="loadData()">تحديث</button>
       </div>
       <div class="muted" id="updated">-</div>
     </div>
@@ -626,12 +626,12 @@ a{color:#2563eb;text-decoration:none}.toast{position:fixed;left:18px;bottom:18px
 <div class="toast" id="toast"></div>
 <script>
 const urlToken = new URLSearchParams(location.search).get('token');
-let TOKEN = urlToken || localStorage.adminWebToken || prompt('ط£ط¯ط®ظ„ طھظˆظƒظ† ظ„ظˆط­ط© ط§ظ„ظ…ط¯ظٹط±');
+let TOKEN = urlToken || localStorage.adminWebToken || prompt('أدخل توكن لوحة المدير');
 localStorage.adminWebToken = TOKEN || '';
 let DATA = null;
 const tabs = [
-  ['overview','ط§ظ„ظ…ظ„ط®طµ'],['tools','ط§ظ„ط£ط¯ظˆط§طھ'],['blocked','ط§ظ„ظ…ط­ط¸ظˆط±ط©'],['queue','ط§ظ„ط·ط§ط¨ظˆط±'],['users','ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†'],
-  ['subscriptions','ط§ظ„ط§ط´طھط±ط§ظƒط§طھ'],['watches','ط§ظ„ظ…طھط§ط¨ط¹ط©'],['trusted','ط§ظ„ظ…ظ†طµط§طھ'],['payments','ط§ظ„ظ…ط¯ظپظˆط¹ط§طھ'],['alerts','ط§ظ„طھظ†ط¨ظٹظ‡ط§طھ'],['events','ط³ط¬ظ„ ط§ظ„ط¨ط­ط«'],['details','طھظپط§طµظٹظ„ ط§ظ„ط¨ط­ط«']
+  ['overview','الملخص'],['tools','الأدوات'],['blocked','المحظورة'],['queue','الطابور'],['users','المستخدمون'],
+  ['subscriptions','الاشتراكات'],['watches','المتابعة'],['trusted','المنصات'],['payments','المدفوعات'],['alerts','التنبيهات'],['events','سجل البحث'],['details','تفاصيل البحث']
 ];
 tabs.splice(8, 0, ['tetherWatcher', 'مراقب Tether']);
 document.getElementById('nav').innerHTML = tabs.map(([id,label]) => '<button data-tab="'+id+'" onclick="showTab(\\''+id+'\\')">'+label+'</button>').join('');
@@ -647,10 +647,10 @@ async function api(path, options={}){
   if(!data.ok){
     if(res.status === 401){
       localStorage.removeItem('adminWebToken');
-      TOKEN = prompt('ط§ظ„طھظˆظƒظ† ط؛ظٹط± طµط­ظٹط­. ط£ط¯ط®ظ„ طھظˆظƒظ† ظ„ظˆط­ط© ط§ظ„ظ…ط¯ظٹط± ظ…ظ† ط¬ط¯ظٹط¯') || '';
+      TOKEN = prompt('التوكن غير صحيح. أدخل توكن لوحة المدير من جديد') || '';
       localStorage.adminWebToken = TOKEN;
     }
-    throw new Error(data.error || 'ظپط´ظ„ ط§ظ„ط·ظ„ط¨');
+    throw new Error(data.error || 'فشل الطلب');
   }
   return data.data;
 }
@@ -660,7 +660,7 @@ async function loadData(){
     const limit = document.getElementById('limit').value;
     DATA = await api('/api/dashboard?q='+q+'&limit='+limit);
     renderAll();
-    toast('طھظ… ط§ظ„طھط­ط¯ظٹط«');
+    toast('تم التحديث');
   }catch(err){ toast(err.message); }
 }
 function showTab(id){
@@ -670,42 +670,42 @@ function showTab(id){
   document.querySelector('[data-tab='+id+']').classList.add('active');
 }
 function renderAll(){
-  document.getElementById('updated').textContent = 'ط¢ط®ط± طھط­ط¯ظٹط«: '+fmtDate(DATA.generatedAt);
+  document.getElementById('updated').textContent = 'آخر تحديث: '+fmtDate(DATA.generatedAt);
   renderOverview(); renderTools(); renderBlocked(); renderQueue(); renderUsers(); renderSubs(); renderWatches(); renderTrusted(); renderTetherWatcher(); renderPayments(); renderAlerts(); renderEvents(); renderDetails();
 }
 function renderOverview(){
   const s = DATA.summary;
   cardGrid('overview', [
-    ['ط§ظ„ط¹ظ†ط§ظˆظٹظ† ط§ظ„ظ…ط­ط¸ظˆط±ط©', s.risk.blocked, 'ط¥ط¬ظ…ط§ظ„ظٹ: '+s.risk.total],
-    ['ط§ظ„ط¹ظ„ط§ظ‚ط§طھ ط§ظ„ط®ط·ط±ط©', s.risk.riskyEdges, 'ظƒظ„ ط§ظ„ط¹ظ„ط§ظ‚ط§طھ: '+s.risk.edges],
-    ['ط¨ط§ظ†طھط¸ط§ط± ط§ظ„ظپط­طµ', s.queue.pending, 'ظ‚ظٹط¯ ط§ظ„ظپط­طµ: '+s.queue.running],
-    ['ط§ظ„ظ…ط³طھط®ط¯ظ…ظˆظ†', s.users.total, 'ط§ظ„ظپط­ظˆطµط§طھ: '+s.users.searches],
-    ['ظ…ط´طھط±ظƒظٹظ† ظ†ط´ط·ظٹظ†', s.subscriptions.active, 'ظ…ط­ط§ظپط¸ ظ…طھط§ط¨ط¹ط©: '+s.subscriptions.watches],
-    ['ط§ظ„ط¥ظٹط±ط§ط¯', money(s.subscriptions.revenue)+' USDT', 'ظ…ط¯ظپظˆط¹ط§طھ: '+s.subscriptions.paidPayments],
-    ['طھظ†ط¨ظٹظ‡ط§طھ ظ…ظپطھظˆط­ط©', s.subscriptions.openAlerts, 'ظ…ظƒطھظˆظ…ط©: '+s.subscriptions.mutedAlerts],
-    ['ظ…ظ†طµط§طھ ظ…ظˆط«ظˆظ‚ط©', s.trusted.total, 'ظٹط¯ظˆظٹ: '+s.trusted.manual+' | طھظ„ظ‚ط§ط¦ظٹ: '+s.trusted.automatic],
+    ['العناوين المحظورة', s.risk.blocked, 'إجمالي: '+s.risk.total],
+    ['العلاقات الخطرة', s.risk.riskyEdges, 'كل العلاقات: '+s.risk.edges],
+    ['بانتظار الفحص', s.queue.pending, 'قيد الفحص: '+s.queue.running],
+    ['المستخدمون', s.users.total, 'الفحوصات: '+s.users.searches],
+    ['مشتركين نشطين', s.subscriptions.active, 'محافظ متابعة: '+s.subscriptions.watches],
+    ['الإيراد', money(s.subscriptions.revenue)+' USDT', 'مدفوعات: '+s.subscriptions.paidPayments],
+    ['تنبيهات مفتوحة', s.subscriptions.openAlerts, 'مكتومة: '+s.subscriptions.mutedAlerts],
+    ['منصات موثوقة', s.trusted.total, 'يدوي: '+s.trusted.manual+' | تلقائي: '+s.trusted.automatic],
   ]);
 }
 function renderTools(){
   document.getElementById('tools').innerHTML = '<div class="tools">'+
-    tool('ط¥ط¶ط§ظپط© ط¹ظ†ط§ظˆظٹظ† ظ…ط­ط¸ظˆط±ط© ظƒط¨ط°ظˆط±','<textarea id="seedInput" placeholder="T...\\nT..."></textarea><button class="btn" onclick="addSeeds()">ط¥ط¶ط§ظپط© ظ„ظ„ط·ط§ط¨ظˆط±</button>')+
-    tool('ظ…ظ†ط­ ط§ط´طھط±ط§ظƒ 30 ظٹظˆظ…','<input id="grantInput" placeholder="@username ط£ظˆ Telegram ID"><button class="btn green" onclick="grant()">طھظپط¹ظٹظ„ ط§ظ„ط§ط´طھط±ط§ظƒ</button>')+
-    tool('ط¥ط¶ط§ظپط© ظ…ظ†طµط© ظ…ظˆط«ظˆظ‚ط©','<input id="trustAddress" placeholder="ط¹ظ†ظˆط§ظ† TRON"><input id="trustName" placeholder="ط§ط³ظ… ط§ظ„ظ…ظ†طµط©"><button class="btn amber" onclick="trust()">ط­ظپط¸ ط§ظ„ظ…ظ†طµط©</button>')+
-    tool('ط¥ط±ط³ط§ظ„ ط¬ظ…ط§ط¹ظٹ','<textarea id="broadcastText" placeholder="ظ†طµ ط§ظ„ط±ط³ط§ظ„ط© ظ„ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†"></textarea><button class="btn danger" onclick="broadcast()">ط¥ط±ط³ط§ظ„ ط¨ط¹ط¯ ط§ظ„طھط£ظƒظٹط¯</button>')+
-    tool('ظپط­طµ ط±ظپط¹ ط§ظ„ط­ط¸ط±','<input id="unbanLimit" value="50"><button class="btn secondary" onclick="unbanCheck()">ظپط­طµ ط§ظ„ط¢ظ†</button>')+
-    tool('طھطµط¯ظٹط±','<button class="btn secondary" onclick="download(\\'/api/export/blocked\\')">طھطµط¯ظٹط± ط§ظ„ظ…ط­ط¸ظˆط±</button> <button class="btn secondary" onclick="download(\\'/api/export/users\\')">طھطµط¯ظٹط± ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†</button>')+
+    tool('إضافة عناوين محظورة كبذور','<textarea id="seedInput" placeholder="T...\\nT..."></textarea><button class="btn" onclick="addSeeds()">إضافة للطابور</button>')+
+    tool('منح اشتراك 30 يوم','<input id="grantInput" placeholder="@username أو Telegram ID"><button class="btn green" onclick="grant()">تفعيل الاشتراك</button>')+
+    tool('إضافة منصة موثوقة','<input id="trustAddress" placeholder="عنوان TRON"><input id="trustName" placeholder="اسم المنصة"><button class="btn amber" onclick="trust()">حفظ المنصة</button>')+
+    tool('إرسال جماعي','<textarea id="broadcastText" placeholder="نص الرسالة للمستخدمين"></textarea><button class="btn danger" onclick="broadcast()">إرسال بعد التأكيد</button>')+
+    tool('فحص رفع الحظر','<input id="unbanLimit" value="50"><button class="btn secondary" onclick="unbanCheck()">فحص الآن</button>')+
+    tool('تصدير','<button class="btn secondary" onclick="download(\\'/api/export/blocked\\')">تصدير المحظور</button> <button class="btn secondary" onclick="download(\\'/api/export/users\\')">تصدير المستخدمين</button>')+
   '</div>';
 }
-function renderBlocked(){ table('blocked',['ط§ظ„ط¹ظ†ظˆط§ظ†','طھط§ط±ظٹط® ط§ظ„ط¥ط¶ط§ظپط©','ط¢ط®ط± ظپط­طµ','ط³ط¨ط¨ ط§ظ„ط¥ط¯ط±ط§ط¬'], DATA.blocked, r => [addr(r.address), fmtDate(blockedAt(r)), fmtDate(r.lastChecked), sourceLabels(r.sources).join('<br>')]); }
-function renderQueue(){ table('queue',['ط§ظ„ط¹ظ†ظˆط§ظ†','ط§ظ„ط­ط§ظ„ط©','ط§ظ„ط£ظˆظ„ظˆظٹط©','ط§ظ„ط¹ظ…ظ‚','ط§ظ„ط³ط¨ط¨','ط§ظ„ظ…ط­ط§ظˆظ„ط©','ط§ظ„طھط§ظ„ظٹ'], DATA.queue, r => [addr(r.address), tag(r.status), r.priority, r.depth, r.reason, r.attempts, fmtDate(r.nextRunAt)]); }
-function renderUsers(){ table('users',['ط§ظ„ظ…ط³طھط®ط¯ظ…','Chat','ط§ظ„ظپط­ظˆطµط§طھ','ط¢ط®ط± ط¸ظ‡ظˆط±','ط¢ط®ط± ط¹ظ†ط§ظˆظٹظ†'], DATA.users, r => [userLink(r), r.chatId||'-', r.searches||0, fmtDate(r.lastSeen), Object.keys(r.addresses||{}).slice(-3).map(addr).join('<br>')]); }
-function renderSubs(){ table('subscriptions',['ط§ظ„ظ…ط³طھط®ط¯ظ…','ط§ظ„ط­ط§ظ„ط©','ظٹظ†طھظ‡ظٹ','ظپط­ظˆطµ ط§ظ„ظٹظˆظ…','ظ…ط­ط§ظپط¸','ط¢ط®ط± ط¸ظ‡ظˆط±'], DATA.subscriptions, r => [userLink(r), subTag(r), fmtDate(r.subscription&&r.subscription.expiresAt), usageLine(r.usage), (r.watches||[]).length, fmtDate(r.lastSeen)]); }
-function renderWatches(){ table('watches',['ط§ظ„ط¹ظ†ظˆط§ظ†','ط§ظ„ظ…ط³طھط®ط¯ظ…','ط¢ط®ط± ظپط­طµ ظ†ط§ط¬ط­','ط§ظ„ط­ط§ظ„ط©','ط§ظ„ظ…ط®ط§ط·ط±','طھظ†ط¨ظٹظ‡ط§طھ'], DATA.watches, r => [addr(r.address), userLink(r), fmtDate(r.lastSuccessfulCheckedAt||r.lastCheckedAt), tag(r.lastStatus||'-'), riskTag(r.lastSuccessfulRisk||r.lastRisk), r.sentAlerts||0]); }
-function renderTrusted(){ table('trusted',['ط§ظ„ط¹ظ†ظˆط§ظ†','ط§ظ„ط§ط³ظ…','ط§ظ„ظ…طµط¯ط±','طھظ„ظ‚ط§ط¦ظٹ','ط¢ط®ط± ط¸ظ‡ظˆط±','ط¥ط¬ط±ط§ط،'], DATA.trusted, r => [addr(r.address), esc(r.name), r.source||'-', r.auto?'ظ†ط¹ظ…':'ظ„ط§', fmtDate(r.lastSeen), '<button class="btn danger" onclick="untrust(\\''+r.address+'\\')">ط­ط°ظپ</button>']); }
-function renderPayments(){ table('payments',['ID','ط§ظ„ظ…ط³طھط®ط¯ظ…','ط§ظ„ط­ط§ظ„ط©','ظ…ظ†','ط§ظ„ظ…ط¨ظ„ط؛','ط£ظ†ط´ط¦طھ','ط¯ظپط¹طھ'], DATA.payments, r => [esc(r.id), r.userId, tag(r.status), addr(r.fromAddress), money(r.receivedAmount||r.amount), fmtDate(r.createdAt), fmtDate(r.paidAt)]); }
-function renderAlerts(){ table('alerts',['ط§ظ„ظ…ط­ظپط¸ط©','ط§ظ„ظ…ط³طھط®ط¯ظ…','ط§ظ„ظ†ظˆط¹','ط§ظ„ط·ط±ظپ','ط§ظ„ظ…ط¨ظ„ط؛','ط¥ط±ط³ط§ظ„','ظ…ظƒطھظˆظ…'], DATA.alerts, r => [addr(r.watchAddress), r.userId, tag(r.alertType), addr(r.counterparty), money(r.amount), r.sentCount||0, r.muted?'ظ†ط¹ظ…':'ظ„ط§']); }
-function renderEvents(){ table('events',['ط§ظ„ظˆظ‚طھ','ط§ظ„ظ…ط³طھط®ط¯ظ…','ط§ظ„ط¹ظ†ظˆط§ظ†','ط§ظ„ظ…ط®ط§ط·ط±','ظ…ط­ط¸ظˆط±'], DATA.events, r => [fmtDate(r.at), userLink(r), addr(r.address), riskTag(r.risk), String(r.blacklisted)]); }
-function renderDetails(){ document.getElementById('details').innerHTML = DATA.addressDetails ? '<div class="card details"><h3>طھظپط§طµظٹظ„ ط§ظ„ط¹ظ†ظˆط§ظ†</h3><pre>'+esc(JSON.stringify(DATA.addressDetails,null,2))+'</pre></div>' : '<div class="empty">ط§ظƒطھط¨ ط¹ظ†ظˆط§ظ† TRON ظپظٹ ط§ظ„ط¨ط­ط« ظ„ط¹ط±ط¶ ط§ظ„طھظپط§طµظٹظ„.</div>'; }
+function renderBlocked(){ table('blocked',['العنوان','تاريخ الإضافة','آخر فحص','سبب الإدراج'], DATA.blocked, r => [addr(r.address), fmtDate(blockedAt(r)), fmtDate(r.lastChecked), sourceLabels(r.sources).join('<br>')]); }
+function renderQueue(){ table('queue',['العنوان','الحالة','الأولوية','العمق','السبب','المحاولة','التالي'], DATA.queue, r => [addr(r.address), tag(r.status), r.priority, r.depth, r.reason, r.attempts, fmtDate(r.nextRunAt)]); }
+function renderUsers(){ table('users',['المستخدم','Chat','الفحوصات','آخر ظهور','آخر عناوين'], DATA.users, r => [userLink(r), r.chatId||'-', r.searches||0, fmtDate(r.lastSeen), Object.keys(r.addresses||{}).slice(-3).map(addr).join('<br>')]); }
+function renderSubs(){ table('subscriptions',['المستخدم','الحالة','ينتهي','فحوص اليوم','محافظ','آخر ظهور'], DATA.subscriptions, r => [userLink(r), subTag(r), fmtDate(r.subscription&&r.subscription.expiresAt), usageLine(r.usage), (r.watches||[]).length, fmtDate(r.lastSeen)]); }
+function renderWatches(){ table('watches',['العنوان','المستخدم','آخر فحص ناجح','الحالة','المخاطر','تنبيهات'], DATA.watches, r => [addr(r.address), userLink(r), fmtDate(r.lastSuccessfulCheckedAt||r.lastCheckedAt), tag(r.lastStatus||'-'), riskTag(r.lastSuccessfulRisk||r.lastRisk), r.sentAlerts||0]); }
+function renderTrusted(){ table('trusted',['العنوان','الاسم','المصدر','تلقائي','آخر ظهور','إجراء'], DATA.trusted, r => [addr(r.address), esc(r.name), r.source||'-', r.auto?'نعم':'لا', fmtDate(r.lastSeen), '<button class="btn danger" onclick="untrust(\\''+r.address+'\\')">حذف</button>']); }
+function renderPayments(){ table('payments',['ID','المستخدم','الحالة','من','المبلغ','أنشئت','دفعت'], DATA.payments, r => [esc(r.id), r.userId, tag(r.status), addr(r.fromAddress), money(r.receivedAmount||r.amount), fmtDate(r.createdAt), fmtDate(r.paidAt)]); }
+function renderAlerts(){ table('alerts',['المحفظة','المستخدم','النوع','الطرف','المبلغ','إرسال','مكتوم'], DATA.alerts, r => [addr(r.watchAddress), r.userId, tag(r.alertType), addr(r.counterparty), money(r.amount), r.sentCount||0, r.muted?'نعم':'لا']); }
+function renderEvents(){ table('events',['الوقت','المستخدم','العنوان','المخاطر','محظور'], DATA.events, r => [fmtDate(r.at), userLink(r), addr(r.address), riskTag(r.risk), String(r.blacklisted)]); }
+function renderDetails(){ document.getElementById('details').innerHTML = DATA.addressDetails ? '<div class="card details"><h3>تفاصيل العنوان</h3><pre>'+esc(JSON.stringify(DATA.addressDetails,null,2))+'</pre></div>' : '<div class="empty">اكتب عنوان TRON في البحث لعرض التفاصيل.</div>'; }
 
 function renderTetherWatcher(){
   const w = DATA.tetherWatcher;
@@ -729,16 +729,16 @@ function cardGrid(id, items){ document.getElementById(id).innerHTML = '<div clas
 function tool(title, body){ return '<div class="card tool"><h3>'+title+'</h3>'+body+'</div>'; }
 function table(id, heads, rows, map){
   const el = document.getElementById(id);
-  if(!rows.length){ el.innerHTML='<div class="empty">ظ„ط§ طھظˆط¬ط¯ ط¨ظٹط§ظ†ط§طھ ظ…ط·ط§ط¨ظ‚ط©.</div>'; return; }
+  if(!rows.length){ el.innerHTML='<div class="empty">لا توجد بيانات مطابقة.</div>'; return; }
   el.innerHTML = '<table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+map(r).map(c=>'<td>'+safeCell(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
 }
 function safeCell(v){ return v == null ? '-' : String(v); }
 function addr(a){ if(!a) return '-'; return '<a class="mono" target="_blank" href="https://tronscan.org/#/address/'+encodeURIComponent(a)+'">'+short(a)+'</a>'; }
 function userLink(u){ const id=u.userId||u.chatId; const label=u.username||u.name||id||'-'; return id?'<a href="tg://user?id='+encodeURIComponent(id)+'">'+esc(label)+'</a>':esc(label); }
-function tag(v){ const cls = /failed|ظ…ط­ط¸ظˆط±|blocked|expired|canceled/.test(String(v))?'red':/paid|done|checked|active/.test(String(v))?'green':/pending|running|partial/.test(String(v))?'amber':''; return '<span class="tag '+cls+'">'+esc(v||'-')+'</span>'; }
+function tag(v){ const cls = /failed|محظور|blocked|expired|canceled/.test(String(v))?'red':/paid|done|checked|active/.test(String(v))?'green':/pending|running|partial/.test(String(v))?'amber':''; return '<span class="tag '+cls+'">'+esc(v||'-')+'</span>'; }
 function riskTag(v){ return tag(v||'-'); }
-function subTag(r){ const exp = Date.parse((r.subscription||{}).expiresAt||''); return exp>Date.now()?tag('ظ†ط´ط·'):tag((r.subscription||{}).status||'ظ…ط¬ط§ظ†ظٹ'); }
-function usageLine(u){ if(!u) return '-'; return 'ظ…ط¯ظپظˆط¹: '+(u.paidDayCount||0)+' | ظ…ط¬ط§ظ†ظٹ: '+(u.freeDayCount||0); }
+function subTag(r){ const exp = Date.parse((r.subscription||{}).expiresAt||''); return exp>Date.now()?tag('نشط'):tag((r.subscription||{}).status||'مجاني'); }
+function usageLine(u){ if(!u) return '-'; return 'مدفوع: '+(u.paidDayCount||0)+' | مجاني: '+(u.freeDayCount||0); }
 function blockedAt(r){ return r.blacklistedAt || r.tetherBlacklistedAt || r.firstSeen || r.lastChecked; }
 function tetherAt(r){ return r.tetherBlacklistedAt || r.blacklistedAt || r.firstSeen || r.lastChecked; }
 function sourceLabels(sources){
@@ -763,12 +763,12 @@ function fmtDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return
 function money(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:2}); }
 function esc(v){ return String(v??'').replace(/[&<>"]/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s])); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(window.toastTimer); window.toastTimer=setTimeout(()=>t.style.display='none',3000); }
-async function addSeeds(){ const data=await api('/api/seeds',{method:'POST',body:JSON.stringify({input:document.getElementById('seedInput').value})}); toast('ط£ط¶ظٹظپ: '+data.added.length+' | ظ…ظˆط¬ظˆط¯: '+data.existing.length+' | ط®ط·ط£: '+data.invalid.length); loadData(); }
-async function grant(){ const data=await api('/api/grant',{method:'POST',body:JSON.stringify({query:document.getElementById('grantInput').value})}); toast(data.ok?'طھظ… ط§ظ„طھظپط¹ظٹظ„ ط­طھظ‰ '+fmtDate(data.expiresAt):'ظ„ظ… ظٹطھظ… ط§ظ„ط¹ط«ظˆط± ط¹ظ„ظ‰ ط§ظ„ظ…ط³طھط®ط¯ظ…'); loadData(); }
-async function trust(){ await api('/api/trusted',{method:'POST',body:JSON.stringify({address:document.getElementById('trustAddress').value,name:document.getElementById('trustName').value})}); toast('طھظ… ط­ظپط¸ ط§ظ„ظ…ظ†طµط©'); loadData(); }
-async function untrust(address){ if(!confirm('ط­ط°ظپ ط§ظ„ط¹ظ†ظˆط§ظ† ظ…ظ† ط§ظ„ظ…ظˆط«ظˆظ‚طں')) return; await api('/api/trusted/'+encodeURIComponent(address),{method:'DELETE'}); toast('طھظ… ط§ظ„ط­ط°ظپ'); loadData(); }
-async function broadcast(){ const text=document.getElementById('broadcastText').value; if(!text.trim()) return toast('ط§ظƒطھط¨ ط§ظ„ط±ط³ط§ظ„ط© ط£ظˆظ„ط§'); if(!confirm('طھط£ظƒظٹط¯ ط¥ط±ط³ط§ظ„ ط§ظ„ط±ط³ط§ظ„ط© ظ„ظƒظ„ ط§ظ„ظ…ط³طھط®ط¯ظ…ظٹظ†طں')) return; const data=await api('/api/broadcast',{method:'POST',body:JSON.stringify({text})}); toast('طھظ…: '+(data.sent||0)+' | ظپط´ظ„: '+(data.failed||0)); }
-async function unbanCheck(){ const data=await api('/api/unban-check',{method:'POST',body:JSON.stringify({limit:document.getElementById('unbanLimit').value})}); toast('طھظ… ظپط­طµ '+data.checked+' | ط±ظپط¹ ط­ط¸ط±: '+data.unbanned.length+' | ط£ط®ط·ط§ط،: '+data.errors.length); loadData(); }
+async function addSeeds(){ const data=await api('/api/seeds',{method:'POST',body:JSON.stringify({input:document.getElementById('seedInput').value})}); toast('أضيف: '+data.added.length+' | موجود: '+data.existing.length+' | خطأ: '+data.invalid.length); loadData(); }
+async function grant(){ const data=await api('/api/grant',{method:'POST',body:JSON.stringify({query:document.getElementById('grantInput').value})}); toast(data.ok?'تم التفعيل حتى '+fmtDate(data.expiresAt):'لم يتم العثور على المستخدم'); loadData(); }
+async function trust(){ await api('/api/trusted',{method:'POST',body:JSON.stringify({address:document.getElementById('trustAddress').value,name:document.getElementById('trustName').value})}); toast('تم حفظ المنصة'); loadData(); }
+async function untrust(address){ if(!confirm('حذف العنوان من الموثوق؟')) return; await api('/api/trusted/'+encodeURIComponent(address),{method:'DELETE'}); toast('تم الحذف'); loadData(); }
+async function broadcast(){ const text=document.getElementById('broadcastText').value; if(!text.trim()) return toast('اكتب الرسالة أولا'); if(!confirm('تأكيد إرسال الرسالة لكل المستخدمين؟')) return; const data=await api('/api/broadcast',{method:'POST',body:JSON.stringify({text})}); toast('تم: '+(data.sent||0)+' | فشل: '+(data.failed||0)); }
+async function unbanCheck(){ const data=await api('/api/unban-check',{method:'POST',body:JSON.stringify({limit:document.getElementById('unbanLimit').value})}); toast('تم فحص '+data.checked+' | رفع حظر: '+data.unbanned.length+' | أخطاء: '+data.errors.length); loadData(); }
 function download(path){ window.open(path+'?token='+encodeURIComponent(TOKEN),'_blank'); }
 </script>
 </body>
