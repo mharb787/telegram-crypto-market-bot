@@ -28,7 +28,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (req.method === 'GET' && url.pathname === '/') return sendHtml(res);
-    if (!isAuthorized(req, url)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    if (!isAuthorized(req, url)) {
+      logger.warn(`Admin web unauthorized request: ${authDebug(req, url)}`);
+      return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/dashboard') {
       return sendJson(res, 200, { ok: true, data: await buildDashboardData(url.searchParams) });
@@ -490,6 +493,24 @@ function isAuthorized(req, url) {
   const headerToken = String(req.headers['x-admin-token'] ?? '').trim();
   const queryToken = String(url.searchParams.get('token') ?? '').trim();
   return bearer === token || headerToken === token || queryToken === token;
+}
+
+function authDebug(req, url) {
+  const header = req.headers.authorization ?? '';
+  const bearer = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const headerToken = String(req.headers['x-admin-token'] ?? '').trim();
+  const queryToken = String(url.searchParams.get('token') ?? '').trim();
+  return JSON.stringify({
+    path: url.pathname,
+    expected: tokenProbe(token),
+    bearer: tokenProbe(bearer),
+    header: tokenProbe(headerToken),
+    query: tokenProbe(queryToken),
+  });
+}
+
+function tokenProbe(value) {
+  return `${String(value ?? '').length}:${String(value ?? '').slice(0, 6)}:${String(value ?? '').slice(-4)}`;
 }
 
 async function readBody(req) {
