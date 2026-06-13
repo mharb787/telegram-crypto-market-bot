@@ -246,6 +246,30 @@ export async function getTronScanAccount(address) {
   return fetchJSON(`${TRONSCAN_URL}/api/account?address=${address}&includeToken=true`);
 }
 
+export async function getContractEvents(address, {
+  eventName,
+  minTimestamp,
+  maxTimestamp,
+  onlyConfirmed = true,
+  orderBy = 'block_timestamp,asc',
+  limit = 200,
+  fingerprint,
+} = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    order_by: orderBy,
+  });
+  if (eventName) params.set('event_name', eventName);
+  if (minTimestamp != null) params.set('min_timestamp', String(minTimestamp));
+  if (maxTimestamp != null) params.set('max_timestamp', String(maxTimestamp));
+  if (onlyConfirmed) params.set('only_confirmed', 'true');
+  if (fingerprint) params.set('fingerprint', fingerprint);
+
+  return fetchJSON(`${BASE_URL}/v1/contracts/${address}/events?${params}`, {
+    headers: headers(),
+  });
+}
+
 /**
  * Main export: tries RPC first, falls back to TronScan.
  * Returns true | false | null.
