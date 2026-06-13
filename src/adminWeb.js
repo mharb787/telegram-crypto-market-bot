@@ -647,7 +647,7 @@ function renderTools(){
     tool('تصدير','<button class="btn secondary" onclick="download(\\'/api/export/blocked\\')">تصدير المحظور</button> <button class="btn secondary" onclick="download(\\'/api/export/users\\')">تصدير المستخدمين</button>')+
   '</div>';
 }
-function renderBlocked(){ table('blocked',['العنوان','أضيف','آخر فحص','المصادر'], DATA.blocked, r => [addr(r.address), fmtDate(blockedAt(r)), fmtDate(r.lastChecked), (r.sources||[]).join(', ')]); }
+function renderBlocked(){ table('blocked',['العنوان','تاريخ الإضافة','آخر فحص','سبب الإدراج'], DATA.blocked, r => [addr(r.address), fmtDate(blockedAt(r)), fmtDate(r.lastChecked), sourceLabels(r.sources).join('<br>')]); }
 function renderQueue(){ table('queue',['العنوان','الحالة','الأولوية','العمق','السبب','المحاولة','التالي'], DATA.queue, r => [addr(r.address), tag(r.status), r.priority, r.depth, r.reason, r.attempts, fmtDate(r.nextRunAt)]); }
 function renderUsers(){ table('users',['المستخدم','Chat','الفحوصات','آخر ظهور','آخر عناوين'], DATA.users, r => [userLink(r), r.chatId||'-', r.searches||0, fmtDate(r.lastSeen), Object.keys(r.addresses||{}).slice(-3).map(addr).join('<br>')]); }
 function renderSubs(){ table('subscriptions',['المستخدم','الحالة','ينتهي','فحوص اليوم','محافظ','آخر ظهور'], DATA.subscriptions, r => [userLink(r), subTag(r), fmtDate(r.subscription&&r.subscription.expiresAt), usageLine(r.usage), (r.watches||[]).length, fmtDate(r.lastSeen)]); }
@@ -673,6 +673,23 @@ function riskTag(v){ return tag(v||'-'); }
 function subTag(r){ const exp = Date.parse((r.subscription||{}).expiresAt||''); return exp>Date.now()?tag('نشط'):tag((r.subscription||{}).status||'مجاني'); }
 function usageLine(u){ if(!u) return '-'; return 'مدفوع: '+(u.paidDayCount||0)+' | مجاني: '+(u.freeDayCount||0); }
 function blockedAt(r){ return r.blacklistedAt || r.tetherBlacklistedAt || r.firstSeen || r.lastChecked; }
+function sourceLabels(sources){
+  const labels = {
+    tether_event: 'حظر مباشر من حدث Tether على الشبكة',
+    tether_event_removed: 'حدث رفع حظر من Tether',
+    user_check: 'اكتشف أثناء فحص مستخدم للعنوان نفسه',
+    user_check_counterparty: 'اكتشف كطرف مقابل أثناء فحص مستخدم',
+    crawler: 'اكتشفه الزاحف من معاملات عنوان محظور',
+    crawler_check: 'تأكد منه الزاحف عبر فحص Tether',
+    seed: 'بذرة أولية للنظام',
+    admin_seed: 'أضافه المدير يدويا من بوت المدير',
+    admin_web_seed: 'أضافه المدير يدويا من لوحة الويب',
+    unban_monitor: 'راجعه نظام متابعة رفع الحظر',
+    admin_web_unban_check: 'راجعه المدير من لوحة الويب',
+  };
+  const list = [...new Set(sources || [])].map(source => labels[source] || ('مصدر غير مصنف: '+source));
+  return list.length ? list : ['غير محدد'];
+}
 function short(a){ return a && a.length>14 ? a.slice(0,6)+'...'+a.slice(-6) : a; }
 function fmtDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return esc(v); return d.toLocaleString('en-GB',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function money(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:2}); }
