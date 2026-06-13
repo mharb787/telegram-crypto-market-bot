@@ -577,7 +577,8 @@ a{color:#2563eb;text-decoration:none}.toast{position:fixed;left:18px;bottom:18px
 </div>
 <div class="toast" id="toast"></div>
 <script>
-let TOKEN = localStorage.adminWebToken || new URLSearchParams(location.search).get('token') || prompt('أدخل توكن لوحة المدير');
+const urlToken = new URLSearchParams(location.search).get('token');
+let TOKEN = urlToken || localStorage.adminWebToken || prompt('أدخل توكن لوحة المدير');
 localStorage.adminWebToken = TOKEN || '';
 let DATA = null;
 const tabs = [
@@ -594,7 +595,14 @@ function authHeaders(){return {'authorization':'Bearer '+TOKEN,'content-type':'a
 async function api(path, options={}){
   const res = await fetch(path, {...options, headers:{...authHeaders(), ...(options.headers||{})}});
   const data = await res.json();
-  if(!data.ok) throw new Error(data.error || 'فشل الطلب');
+  if(!data.ok){
+    if(res.status === 401){
+      localStorage.removeItem('adminWebToken');
+      TOKEN = prompt('التوكن غير صحيح. أدخل توكن لوحة المدير من جديد') || '';
+      localStorage.adminWebToken = TOKEN;
+    }
+    throw new Error(data.error || 'فشل الطلب');
+  }
   return data.data;
 }
 async function loadData(){
