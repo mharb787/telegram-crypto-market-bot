@@ -281,13 +281,13 @@ bot.onText(/^\/addr(?:\s+(\S+))?/, async (msg, match) => {
   await bot.sendMessage(msg.chat.id, formatAddressUsers(usage, address), adminHtml);
 });
 
-bot.onText(/^\/investigate(?:\s+(\S+))?/, async (msg, match) => {
+bot.onText(/^(?:\/investigate(?:@\w+)?|تحري|تحقيق)(?:\s+(\S+))?/i, async (msg, match) => {
   if (!isAllowed(msg)) return;
   const address = match?.[1]?.trim();
   if (!address) {
     await bot.sendMessage(
       msg.chat.id,
-      'استخدم:\n<code>/investigate T...</code>\n\nيفحص العنوان داخل سجل المستخدمين وشبكة العلاقات المحلية حتى درجتين.',
+      'استخدم:\n<code>/investigate T...</code>\nأو:\n<code>تحري T...</code>\n\nيفحص العنوان داخل سجل المستخدمين وشبكة العلاقات المحلية حتى درجتين.',
       adminHtml
     );
     return;
