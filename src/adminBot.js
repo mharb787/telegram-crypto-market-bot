@@ -14,6 +14,7 @@ import { checkBlacklistConstantContract, isBlacklistedByTether } from './api/tro
 import { loadUsageLog } from './usageLog.js';
 import { loadSubscriptions, saveSubscriptions } from './subscriptions.js';
 import { listTrustedEntities, removeTrustedEntity, upsertTrustedEntity } from './trustedEntities.js';
+import { investigateAddress, formatInvestigationForTelegram } from './adminInvestigation.js';
 import { logger } from './utils/logger.js';
 
 const token = process.env.ADMIN_BOT_TOKEN;
@@ -48,6 +49,7 @@ const adminKeyboard = {
       [{ text: '/pending' }, { text: '/blocked' }],
       [{ text: '/blocked' }, { text: '/export_blocked' }],
       [{ text: '/trusted' }],
+      [{ text: '/investigate' }],
       [{ text: '/export_users' }],
       [{ text: '/broadcast' }],
       [{ text: '/check_unbanned' }, { text: '/help' }],
@@ -74,6 +76,7 @@ await bot.setMyCommands([
   { command: 'users', description: 'قائمة المستخدمين' },
   { command: 'user', description: 'تفاصيل مستخدم' },
   { command: 'addr', description: 'من بحث عن عنوان' },
+  { command: 'investigate', description: 'تحقيق في عنوان وشبكة ارتباطاته' },
   { command: 'export_users', description: 'تصدير سجل المستخدمين' },
   { command: 'broadcast', description: 'إرسال رسالة لكل المستخدمين' },
   { command: 'confirm_broadcast', description: 'تأكيد الإرسال الجماعي' },
@@ -276,6 +279,43 @@ bot.onText(/^\/addr(?:\s+(\S+))?/, async (msg, match) => {
   }
   const usage = await loadUsageLog();
   await bot.sendMessage(msg.chat.id, formatAddressUsers(usage, address), adminHtml);
+});
+
+bot.onText(/^\/investigate(?:\s+(\S+))?/, async (msg, match) => {
+  if (!isAllowed(msg)) return;
+  const address = match?.[1]?.trim();
+  if (!address) {
+    await bot.sendMessage(
+      msg.chat.id,
+      'استخدم:\n<code>/investigate T...</code>\n\nيفحص العنوان داخل سجل المستخدمين وشبكة العلاقات المحلية حتى درجتين.',
+      adminHtml
+    );
+    return;
+  }
+
+  const validation = validateTRC20(address);
+  if (!validation.valid) {
+    await bot.sendMessage(msg.chat.id, `العنوان غير صالح:\n<code>${escapeHtml(address)}</code>`, adminHtml);
+    return;
+  }
+
+  const waiting = await bot.sendMessage(msg.chat.id, 'جاري التحقيق في العنوان داخل قاعدة العلاقات المحلية...', adminKeyboard);
+  try {
+    const [riskDb, usage, subs] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions()]);
+    const result = investigateAddress(address, { riskDb, usage, subs, limit: 100 });
+    const webUrl = buildAdminWebInvestigationUrl(address);
+    await bot.deleteMessage(msg.chat.id, waiting.message_id).catch(() => {});
+    for (const message of splitMessages(formatInvestigationForTelegram(result, { webUrl }), 3500)) {
+      await bot.sendMessage(msg.chat.id, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...adminKeyboard,
+      });
+    }
+  } catch (err) {
+    await bot.deleteMessage(msg.chat.id, waiting.message_id).catch(() => {});
+    await bot.sendMessage(msg.chat.id, `تعذر إكمال التحقيق:\n<code>${escapeHtml(err.message)}</code>`, adminHtml);
+  }
 });
 
 bot.onText(/^\/export_users/, async (msg) => {
@@ -1275,6 +1315,20 @@ function currentWeekKey() {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
+function buildAdminWebInvestigationUrl(address) {
+  const base = String(process.env.ADMIN_WEB_PUBLIC_URL ?? '').trim();
+  if (!base) return null;
+  const token = String(process.env.ADMIN_WEB_TOKEN ?? '').trim();
+  try {
+    const url = new URL(base);
+    if (token) url.searchParams.set('token', token);
+    url.searchParams.set('investigate', address);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function helpText() {
   return [
     '<b>أوامر بوت المدير</b>',
@@ -1294,6 +1348,7 @@ function helpText() {
     '<code>/users</code> قائمة المستخدمين',
     '<code>/user USER_ID</code> تفاصيل مستخدم وعناوينه',
     '<code>/addr T...</code> من بحث عن عنوان معين',
+    '<code>/investigate T...</code> تحقيق في العنوان والمرتبطين به',
     '<code>/export_users</code> تصدير سجل المستخدمين',
     '<code>/broadcast نص الرسالة</code> تجهيز رسالة لكل المستخدمين',
     '<code>/confirm_broadcast ID</code> تأكيد الإرسال الجماعي',

@@ -10,6 +10,7 @@ import { listTrustedEntities, upsertTrustedEntity, removeTrustedEntity } from '.
 import { readJson } from './storage.js';
 import { validateTRC20 } from './validator/trc20.js';
 import { checkBlacklistConstantContract, isBlacklistedByTether } from './api/trongrid.js';
+import { investigateAddress } from './adminInvestigation.js';
 import { logger } from './utils/logger.js';
 
 const host = process.env.ADMIN_WEB_HOST || '0.0.0.0';
@@ -86,6 +87,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/tether-backfill') {
       const body = await readBody(req);
       return sendJson(res, 200, { ok: true, data: await startTetherBackfill(body) });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/investigate') {
+      const body = await readBody(req);
+      const address = String(body.address ?? '').trim();
+      const validation = validateTRC20(address);
+      if (!validation.valid) return sendJson(res, 400, { ok: false, error: 'invalid_address' });
+      const [riskDb, usage, subs] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions()]);
+      const result = investigateAddress(address, {
+        riskDb,
+        usage,
+        subs,
+        limit: clamp(Number(body.limit) || 100, 20, 500),
+      });
+      return sendJson(res, 200, { ok: true, data: result });
     }
 
     return sendJson(res, 404, { ok: false, error: 'not_found' });
@@ -667,6 +682,7 @@ a{color:#2563eb;text-decoration:none}.toast{position:fixed;left:18px;bottom:18px
     </div>
     <section id="overview" class="section active"></section>
     <section id="tools" class="section"></section>
+    <section id="investigate" class="section"></section>
     <section id="blocked" class="section"></section>
     <section id="queue" class="section"></section>
     <section id="users" class="section"></section>
@@ -687,10 +703,10 @@ let TOKEN = urlToken || localStorage.adminWebToken || prompt('أدخل توكن 
 localStorage.adminWebToken = TOKEN || '';
 let DATA = null;
 const tabs = [
-  ['overview','الملخص'],['tools','الأدوات'],['blocked','المحظورة'],['queue','الطابور'],['users','المستخدمون'],
+  ['overview','الملخص'],['tools','الأدوات'],['investigate','تحقيق'],['blocked','المحظورة'],['queue','الطابور'],['users','المستخدمون'],
   ['subscriptions','الاشتراكات'],['watches','المتابعة'],['trusted','المنصات'],['payments','المدفوعات'],['alerts','التنبيهات'],['events','سجل البحث'],['details','تفاصيل البحث']
 ];
-tabs.splice(8, 0, ['tetherWatcher', 'مراقب Tether']);
+tabs.splice(9, 0, ['tetherWatcher', 'مراقب Tether']);
 document.getElementById('nav').innerHTML = tabs.map(([id,label]) => '<button data-tab="'+id+'" onclick="showTab(\\''+id+'\\')">'+label+'</button>').join('');
 document.querySelector('[data-tab=overview]').classList.add('active');
 document.getElementById('search').addEventListener('keydown', e => { if(e.key === 'Enter') loadData(); });
@@ -717,8 +733,17 @@ async function loadData(){
     const limit = document.getElementById('limit').value;
     DATA = await api('/api/dashboard?q='+q+'&limit='+limit);
     renderAll();
+    applyInvestigationParam();
     toast('تم التحديث');
   }catch(err){ toast(err.message); }
+}
+function applyInvestigationParam(){
+  const value = new URLSearchParams(location.search).get('investigate');
+  if(!value || window.investigationParamApplied) return;
+  window.investigationParamApplied = true;
+  showTab('investigate');
+  document.getElementById('investigateAddress').value = value;
+  runInvestigation();
 }
 function showTab(id){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -728,7 +753,7 @@ function showTab(id){
 }
 function renderAll(){
   document.getElementById('updated').textContent = 'آخر تحديث: '+fmtDate(DATA.generatedAt);
-  renderOverview(); renderTools(); renderBlocked(); renderQueue(); renderUsers(); renderSubs(); renderWatches(); renderTrusted(); renderTetherWatcher(); renderPayments(); renderAlerts(); renderEvents(); renderDetails();
+  renderOverview(); renderTools(); renderInvestigate(); renderBlocked(); renderQueue(); renderUsers(); renderSubs(); renderWatches(); renderTrusted(); renderTetherWatcher(); renderPayments(); renderAlerts(); renderEvents(); renderDetails();
 }
 function renderOverview(){
   const s = DATA.summary;
@@ -752,6 +777,60 @@ function renderTools(){
     tool('فحص رفع الحظر','<input id="unbanLimit" value="50"><button class="btn secondary" onclick="unbanCheck()">فحص الآن</button>')+
     tool('تصدير','<button class="btn secondary" onclick="download(\\'/api/export/blocked\\')">تصدير المحظور</button> <button class="btn secondary" onclick="download(\\'/api/export/users\\')">تصدير المستخدمين</button>')+
   '</div>';
+}
+function renderInvestigate(){
+  const el = document.getElementById('investigate');
+  if(!el.dataset.ready){
+    el.dataset.ready = '1';
+    el.innerHTML =
+      '<div class="card tool">'+
+        '<h3>تحقيق في عنوان</h3>'+
+        '<p class="muted">يفحص سجل بحث المستخدمين ومحافظ المتابعة وعلاقات القاعدة المحلية حتى درجتين.</p>'+
+        '<input id="investigateAddress" placeholder="عنوان TRON">'+
+        '<button class="btn" onclick="runInvestigation()">تشغيل التحقيق</button>'+
+      '</div>'+
+      '<div id="investigationResult"></div>';
+  }
+}
+async function runInvestigation(){
+  const address = document.getElementById('investigateAddress').value.trim();
+  if(!address) return toast('اكتب العنوان أولا');
+  try{
+    const data = await api('/api/investigate',{method:'POST',body:JSON.stringify({address,limit:100})});
+    renderInvestigationResult(data);
+    toast('تم التحقيق');
+  }catch(err){ toast(err.message === 'invalid_address' ? 'العنوان غير صالح' : err.message); }
+}
+function renderInvestigationResult(r){
+  document.getElementById('investigationResult').innerHTML =
+    '<div class="grid">'+
+      metricCard('بحث مباشر', r.summary.directUserMatches, 'متابعة مباشرة: '+r.summary.directWatchMatches)+
+      metricCard('علاقات مباشرة', r.summary.directRelations, 'عليها مستخدمون: '+r.summary.directRelatedUserMatches)+
+      metricCard('علاقات غير مباشرة', r.summary.indirectRelations, 'عليها مستخدمون: '+r.summary.indirectRelatedUserMatches)+
+      metricCard('محظور داخل الشبكة', r.summary.blacklistedInNetwork, 'خطر مباشر: '+r.summary.riskyDirect+' | غير مباشر: '+r.summary.riskyIndirect)+
+    '</div>'+
+    '<div class="card"><h3>العنوان محل التحقيق</h3>'+tableHtml(['العنوان','حالة القاعدة','بحث عنه','يتابعه'], [r.self], x => [addr(r.address), investigationRisk(x.risk), investigationUsers(x.users), investigationUsers(x.watchers)])+'</div>'+
+    '<div class="card"><h3>عناوين مرتبطة مباشرة وبحث عنها مستخدمون</h3>'+investigationRelationTable(r.directHits, false)+'</div>'+
+    '<div class="card"><h3>عناوين مرتبطة غير مباشرة وبحث عنها مستخدمون</h3>'+investigationRelationTable(r.indirectHits, true)+'</div>'+
+    '<div class="card"><h3>أخطر العلاقات المباشرة</h3>'+investigationRelationTable(r.riskyDirect, false)+'</div>';
+}
+function investigationRelationTable(rows, showVia){
+  return tableHtml(showVia ? ['العنوان','عبر','الحالة','علاقات','آخر علاقة','مستخدمون'] : ['العنوان','الحالة','علاقات','آخر علاقة','مستخدمون'], rows, r => {
+    const base = [addr(r.address), investigationRisk(r.risk), r.edgeCount, fmtDate(r.latestAt), investigationUsers([...(r.users||[]), ...(r.watchers||[])])];
+    if(showVia) base.splice(1, 0, (r.via||[]).slice(0,3).map(addr).join('<br>') || '-');
+    return base;
+  });
+}
+function investigationRisk(risk){
+  if(!risk || !risk.isKnown) return tag('غير معروف');
+  if(risk.isBlacklisted === true) return tag('محظور');
+  if(risk.wasBlacklisted === true) return tag('كان محظورا');
+  if(risk.isBlacklisted === false) return tag('غير محظور');
+  return tag('موجود');
+}
+function investigationUsers(users){
+  if(!users || users.length === 0) return '-';
+  return users.slice(0,5).map(u => userLink(u)+' <span class="muted">('+((u.count||u.lastRisk)?((u.count?'عدد '+u.count:'')+(u.lastRisk?' | '+u.lastRisk:'')):'متابعة')+')</span>').join('<br>');
 }
 function renderBlocked(){ table('blocked',['العنوان','تاريخ الإضافة','آخر فحص','سبب الإدراج'], DATA.blocked, r => [addr(r.address), fmtDate(blockedAt(r)), fmtDate(r.lastChecked), sourceLabels(r.sources).join('<br>')]); }
 function renderQueue(){ table('queue',['العنوان','الحالة','الأولوية','العمق','السبب','المحاولة','التالي'], DATA.queue, r => [addr(r.address), tag(r.status), r.priority, r.depth, r.reason, r.attempts, fmtDate(r.nextRunAt)]); }
