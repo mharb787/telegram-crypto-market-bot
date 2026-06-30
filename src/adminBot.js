@@ -111,11 +111,11 @@ bot.onText(/^\/subs/, async (msg) => {
   await bot.sendMessage(msg.chat.id, formatSubscriptionStats(subs), adminHtml);
 });
 
-bot.onText(/^\/grant(?:\s+(\S+))?/, async (msg, match) => {
+bot.onText(/^(?:\/grant(?:@\w+)?|منح)(?:\s+(\S+))?/i, async (msg, match) => {
   if (!isAllowed(msg)) return;
   const query = match?.[1]?.trim();
   if (!query) {
-    await bot.sendMessage(msg.chat.id, 'استخدم:\n<code>/grant USERNAME_OR_TELEGRAM_ID</code>\n\nمثال:\n<code>/grant @gulfex</code>\n<code>/grant 5331781669</code>', adminHtml);
+    await bot.sendMessage(msg.chat.id, 'استخدم:\n<code>/grant USERNAME_OR_TELEGRAM_ID</code>\nأو:\n<code>منح USERNAME_OR_TELEGRAM_ID</code>\n\nمثال:\n<code>/grant @gulfex</code>\n<code>/grant 5331781669</code>', adminHtml);
     return;
   }
 
