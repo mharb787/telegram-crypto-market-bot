@@ -23,6 +23,7 @@ const EVENT_LIMIT = Math.min(200, Math.max(20, Number(process.env.TETHER_WATCHER
 const REQUEST_DELAY_MS = Math.max(0, Number(process.env.TETHER_WATCHER_REQUEST_DELAY_MS) || 1000);
 const ONCE = process.argv.includes('--once') || process.env.TETHER_WATCHER_ONCE === 'true';
 const adminChatIds = parseIdList(process.env.ADMIN_CHAT_IDS);
+const blacklistAlertChatIds = parseIdList(process.env.BLACKLIST_ALERT_CHAT_IDS);
 const bot = process.env.ADMIN_BOT_TOKEN ? new TelegramBot(process.env.ADMIN_BOT_TOKEN, { polling: false }) : null;
 
 async function main() {
@@ -241,8 +242,9 @@ async function saveState(state) {
 }
 
 async function notifyAdmins(message) {
-  if (!bot || adminChatIds.size === 0) return;
-  for (const chatId of adminChatIds) {
+  const recipients = new Set([...adminChatIds, ...blacklistAlertChatIds]);
+  if (!bot || recipients.size === 0) return;
+  for (const chatId of recipients) {
     await bot.sendMessage(chatId, message, {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
