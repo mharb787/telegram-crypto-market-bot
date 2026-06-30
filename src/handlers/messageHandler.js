@@ -84,7 +84,7 @@ export async function handleMessage(bot, msg) {
     }
     user.state = { type: 'add_watch' };
     await saveSubscriptions(db);
-    await bot.sendMessage(chatId, `🛡️ أرسل عنوان TRON لإضافته للمتابعة.\n\nالحد المتاح: ${watchLimit()} محافظ.`, { ...mainKeyboard });
+    await bot.sendMessage(chatId, `🛡️ أرسل عنوان TRON لإضافته للمتابعة.\n\nالحد المتاح: ${watchLimit(user)} محافظ.`, { ...mainKeyboard });
     return;
   }
 
@@ -422,7 +422,7 @@ async function addWatchAndScan(bot, chatId, db, user, address) {
   const result = addWatch(user, address);
   await saveSubscriptions(db);
   if (!result.ok) {
-    await bot.sendMessage(chatId, watchResultText(result), { ...mainKeyboard });
+    await bot.sendMessage(chatId, watchResultText(result, user), { ...mainKeyboard });
     return;
   }
 
@@ -471,7 +471,7 @@ async function handleEditWatch(bot, msg, db, user, text) {
     await bot.sendMessage(chatId, 'تم تعديل المحفظة.', walletMessageOptions(result.watch));
     return;
   }
-  await bot.sendMessage(chatId, watchResultText(result), { ...mainKeyboard });
+  await bot.sendMessage(chatId, watchResultText(result, user), { ...mainKeyboard });
 }
 
 function subscriptionOfferText() {
@@ -585,7 +585,7 @@ function accountText(user) {
     `الخطة: ${allowance.plan === 'unlimited' ? 'مفتوح' : isSubscribed(user) ? 'مشترك' : 'مجاني'}`,
     `ينتهي الاشتراك: ${isSubscribed(user) ? expires : '-'}`,
     `الفحوصات: ${formatAllowance(allowance)}`,
-    `محافظ المتابعة: ${(user.watches ?? []).length}/${watchLimit()}`,
+    `محافظ المتابعة: ${(user.watches ?? []).length}/${watchLimit(user)}`,
   ].join('\n');
 }
 
@@ -718,11 +718,11 @@ function checkModeOptions(address) {
   };
 }
 
-function watchResultText(result) {
+function watchResultText(result, user = null) {
   if (result.ok) return '✅ تم إضافة المحفظة للمتابعة.';
   if (result.reason === 'subscription_required') return 'هذه الميزة للمشتركين فقط.';
   if (result.reason === 'exists') return 'هذه المحفظة موجودة مسبقا في المتابعة.';
-  if (result.reason === 'limit') return `وصلت للحد الأقصى: ${watchLimit()} محافظ.`;
+  if (result.reason === 'limit') return `وصلت للحد الأقصى: ${result.limit ?? watchLimit(user)} محافظ.`;
   return 'تعذر تنفيذ العملية.';
 }
 

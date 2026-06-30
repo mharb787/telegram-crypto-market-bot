@@ -210,7 +210,8 @@ export function addWatch(user, address) {
   user.watches ??= [];
   if (!isSubscribed(user)) return { ok: false, reason: 'subscription_required' };
   if (user.watches.some(item => item.address === address)) return { ok: false, reason: 'exists' };
-  if (user.watches.length >= WATCH_LIMIT) return { ok: false, reason: 'limit' };
+  const limit = watchLimit(user);
+  if (user.watches.length >= limit) return { ok: false, reason: 'limit', limit };
   const now = new Date().toISOString();
   const watch = {
     id: `${Date.now()}`,
@@ -355,7 +356,9 @@ export function alertMuteGroupId(alert) {
   ].join(':'))}`;
 }
 
-export function watchLimit() {
+export function watchLimit(user = null) {
+  const override = Number(user?.subscription?.watchLimit ?? user?.usage?.watchLimit ?? user?.watchLimitOverride);
+  if (Number.isFinite(override) && override > 0) return Math.floor(override);
   return WATCH_LIMIT;
 }
 
