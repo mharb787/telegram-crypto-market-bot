@@ -1,9 +1,10 @@
 const DEFAULT_LIMIT = 100;
 
-export function investigateAddress(address, { riskDb, usage, subs, limit = DEFAULT_LIMIT } = {}) {
+export function investigateAddress(address, { riskDb, usage, subs, trustedAddresses = [], limit = DEFAULT_LIMIT } = {}) {
   const normalized = String(address ?? '').trim();
   const edges = Object.values(riskDb?.edges ?? {});
-  const edgeMap = buildEdgeMap(edges);
+  const trustedSet = toAddressSet(trustedAddresses);
+  const edgeMap = buildEdgeMap(edges, trustedSet);
   const directMap = edgeMap.get(normalized) ?? new Map();
   const directAddresses = [...directMap.keys()];
   const secondMap = new Map();
@@ -106,14 +107,24 @@ export function formatInvestigationForTelegram(result, { webUrl = null } = {}) {
   return lines.join('\n');
 }
 
-function buildEdgeMap(edges) {
+function buildEdgeMap(edges, trustedSet = new Set()) {
   const map = new Map();
   for (const edge of edges) {
     if (!edge.from || !edge.to) continue;
+    if (trustedSet.has(edge.from) || trustedSet.has(edge.to)) continue;
     addEdge(map, edge.from, edge.to, edge);
     addEdge(map, edge.to, edge.from, edge);
   }
   return map;
+}
+
+function toAddressSet(value) {
+  if (value instanceof Set) return value;
+  if (Array.isArray(value)) {
+    return new Set(value.map(item => typeof item === 'string' ? item : item?.address).filter(Boolean));
+  }
+  if (value && typeof value === 'object') return new Set(Object.keys(value));
+  return new Set();
 }
 
 function addEdge(map, from, to, edge) {

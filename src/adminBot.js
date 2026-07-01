@@ -301,8 +301,8 @@ bot.onText(/^(?:\/investigate(?:@\w+)?|تحري|تحقيق)(?:\s+(\S+))?/i, asyn
 
   const waiting = await bot.sendMessage(msg.chat.id, 'جاري التحقيق في العنوان داخل قاعدة العلاقات المحلية...', adminKeyboard);
   try {
-    const [riskDb, usage, subs] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions()]);
-    const result = investigateAddress(address, { riskDb, usage, subs, limit: 100 });
+    const [riskDb, usage, subs, trusted] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions(), listTrustedEntities()]);
+    const result = investigateAddress(address, { riskDb, usage, subs, trustedAddresses: trusted, limit: 100 });
     const webUrl = buildAdminWebInvestigationUrl(address);
     await bot.deleteMessage(msg.chat.id, waiting.message_id).catch(() => {});
     for (const message of splitMessages(formatInvestigationForTelegram(result, { webUrl }), 3500)) {

@@ -93,11 +93,12 @@ const server = http.createServer(async (req, res) => {
       const address = String(body.address ?? '').trim();
       const validation = validateTRC20(address);
       if (!validation.valid) return sendJson(res, 400, { ok: false, error: 'invalid_address' });
-      const [riskDb, usage, subs] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions()]);
+      const [riskDb, usage, subs, trusted] = await Promise.all([loadRiskDb(), loadUsageLog(), loadSubscriptions(), listTrustedEntities()]);
       const result = investigateAddress(address, {
         riskDb,
         usage,
         subs,
+        trustedAddresses: trusted,
         limit: clamp(Number(body.limit) || 100, 20, 500),
       });
       return sendJson(res, 200, { ok: true, data: result });

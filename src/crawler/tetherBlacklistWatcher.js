@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import TelegramBot from 'node-telegram-bot-api';
 import {
   getContractEvents,
+  getAccount,
   isBlacklistedByTether,
   USDT_CONTRACT,
 } from '../api/trongrid.js';
@@ -15,10 +16,12 @@ import {
 } from './riskDb.js';
 import { investigateAddress } from '../adminInvestigation.js';
 import { loadSubscriptions } from '../subscriptions.js';
+import { loadTrustedEntities } from '../trustedEntities.js';
 import { loadUsageLog } from '../usageLog.js';
 import { logger } from '../utils/logger.js';
 
 const STATE_FILE = 'tether-blacklist-watcher.json';
+const MU = 1_000_000;
 const POLL_MS = Math.max(15_000, Number(process.env.TETHER_WATCHER_POLL_MS) || 60_000);
 const INITIAL_LOOKBACK_MS = Math.max(60_000, Number(process.env.TETHER_WATCHER_INITIAL_LOOKBACK_MS) || 10 * 60_000);
 const OVERLAP_MS = Math.max(0, Number(process.env.TETHER_WATCHER_OVERLAP_MS) || 60_000);
@@ -38,7 +41,9 @@ async function main() {
     try {
       const result = await runOnce();
       if (result.added.length > 0) {
-        await notifyAdmins(await formatAddedReport(result.added));
+        for (const message of await formatAddedReports(result.added)) {
+          await notifyAdmins(message);
+        }
       }
       if (result.removed.length > 0) {
         logger.info(`Tether watcher observed removed blacklist addresses: ${result.removed.length}`);
@@ -255,80 +260,94 @@ async function notifyAdmins(message) {
   }
 }
 
-async function formatAddedReport(items) {
-  const [riskDb, usage, subs] = await Promise.all([
+async function formatAddedReports(items) {
+  const [riskDb, usage, subs, trusted] = await Promise.all([
     loadRiskDb(),
     loadUsageLog(),
     loadSubscriptions(),
+    loadTrustedEntities(),
   ]);
-
-  const lines = [
-    '<b>🚨 عناوين جديدة دخلت قائمة Tether السوداء</b>',
-    '',
-    `العدد: <b>${items.length}</b>`,
-    '',
-    ...items.slice(0, 10).map((item, index) => {
-      const investigation = investigateAddress(item.address, { riskDb, usage, subs, limit: 20 });
-      return formatAddedItem(item, index, investigation);
-    }),
-  ];
-  if (items.length > 10) lines.push('', `... و ${items.length - 10} عنوان آخر`);
-  return lines.join('\n');
+  const trustedAddresses = Object.keys(trusted.addresses ?? {});
+  const reports = [];
+  for (const item of items) {
+    const [balance, investigation] = await Promise.all([
+      fetchUsdtBalance(item.address),
+      Promise.resolve(investigateAddress(item.address, { riskDb, usage, subs, trustedAddresses, limit: 20 })),
+    ]);
+    reports.push(formatAddedItem(item, investigation, balance));
+  }
+  return reports;
 }
 
-function formatAddedItem(item, index, investigation) {
+function formatAddedItem(item, investigation, usdtBalance) {
   return [
-    `${index + 1}. ${addressLink(item.address)}`,
-    `وقت الحظر: <code>${shortDate(item.timestamp)}</code>`,
-    item.txid ? `العملية: <a href="https://tronscan.org/#/transaction/${encodeURIComponent(item.txid)}">TronScan</a>` : null,
-    item.block ? `البلوك: <code>${escapeHtml(item.block)}</code>` : null,
-    `تحقق مباشر: <code>${verificationLabel(item.verified)}</code>`,
+    '<b>🚨 عنوان جديد دخل قائمة Tether السوداء</b>',
     '',
-    ...formatCommunityImpact(investigation),
-  ].filter(Boolean).join('\n');
+    '<b>العنوان</b>',
+    addressLink(item.address),
+    '',
+    '<b>التاريخ والوقت</b>',
+    `<code>${shortDate(item.timestamp)}</code>`,
+    '',
+    '<b>الرصيد</b>',
+    `${formatUsdtBalance(usdtBalance)} USDT — ❌ محظور`,
+    '',
+    '-----------',
+    '<b>العلاقات</b>',
+    `مباشرة: <b>${investigation.summary.directRelations}</b> | غير مباشرة: <b>${investigation.summary.indirectRelations}</b> | بحوث مرتبطة: <b>${linkedSearchCount(investigation)}</b>`,
+    '-----------',
+    '',
+    '<b>النتيجة:</b>',
+    ...formatCommunityResult(investigation),
+  ].join('\n');
 }
 
-function formatCommunityImpact(result) {
-  const impacted =
-    result.summary.directUserMatches +
+function linkedSearchCount(result) {
+  return result.summary.directUserMatches +
     result.summary.directWatchMatches +
     result.summary.directRelatedUserMatches +
     result.summary.indirectRelatedUserMatches;
+}
 
-  const lines = [
-    '<b>أثره داخل مجتمع البوت</b>',
-    `• بحث مباشر عن العنوان: <b>${result.summary.directUserMatches}</b> مستخدم`,
-    `• متابعة مباشرة للعنوان: <b>${result.summary.directWatchMatches}</b> مستخدم`,
-    `• مستخدمون بحثوا/تابعوا عناوين مرتبطة مباشرة: <b>${result.summary.directRelatedUserMatches}</b>`,
-    `• مستخدمون ضمن ارتباط غير مباشر: <b>${result.summary.indirectRelatedUserMatches}</b>`,
-    `• علاقات مباشرة في قاعدة البوت: <b>${result.summary.directRelations}</b>`,
-  ];
+function formatCommunityResult(result) {
+  if (linkedSearchCount(result) === 0) return ['لا يوجد أثر داخل مجتمع البوت'];
 
-  if (impacted === 0) {
-    lines.push('لا يوجد أثر ظاهر داخل مجتمع البوت حاليا.');
-    return lines;
+  const lines = ['يوجد أثر داخل مجتمع البوت:'];
+  if (result.summary.directUserMatches > 0 || result.summary.directWatchMatches > 0) {
+    lines.push(`• بحث/متابعة مباشرة لنفس العنوان: <b>${result.summary.directUserMatches + result.summary.directWatchMatches}</b>`);
   }
 
-  const directHits = formatImpactHits(result.directHits, 'أهم ارتباط مباشر');
-  const indirectHits = formatImpactHits(result.indirectHits, 'أهم ارتباط غير مباشر');
-  return [...lines, ...directHits, ...indirectHits];
+  for (const item of result.directHits.slice(0, 3)) {
+    lines.push(formatImpactHit(item, 'مرتبط مباشرة'));
+  }
+  for (const item of result.indirectHits.slice(0, 3)) {
+    lines.push(formatImpactHit(item, 'مرتبط غير مباشر'));
+  }
+  return lines;
 }
 
-function formatImpactHits(items, label) {
-  if (!items?.length) return [];
-  return items.slice(0, 3).map((item) => {
-    const users = [...(item.users ?? []), ...(item.watchers ?? [])]
-      .slice(0, 3)
-      .map(formatUser)
-      .join('، ');
-    return `• ${label}: ${addressLink(item.address)} | المستخدمون: ${users || '-'} | علاقات: <b>${item.edgeCount}</b>`;
-  });
+function formatImpactHit(item, label) {
+  const users = [...(item.users ?? []), ...(item.watchers ?? [])]
+    .slice(0, 3)
+    .map(formatUser)
+    .join('، ');
+  return `• ${label}: ${addressLink(item.address)} | المستخدمون: ${users || '-'} | علاقات: <b>${item.edgeCount}</b>`;
 }
 
-function verificationLabel(value) {
-  if (value === true) return 'محظور';
-  if (value === false) return 'غير مؤكد';
-  return 'تعذر التحقق';
+async function fetchUsdtBalance(address) {
+  try {
+    const account = await getAccount(address);
+    const usdtEntry = account?.trc20?.find(t => t[USDT_CONTRACT]);
+    return usdtEntry ? Number(usdtEntry[USDT_CONTRACT]) / MU : 0;
+  } catch (err) {
+    logger.warn(`Could not fetch USDT balance for ${address}: ${err.message}`);
+    return null;
+  }
+}
+
+function formatUsdtBalance(value) {
+  if (value == null || !Number.isFinite(Number(value))) return 'غير متاح';
+  return Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
 function addressLink(address) {
