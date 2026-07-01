@@ -13,6 +13,9 @@ import {
   saveRiskDb,
   upsertAddress,
 } from './riskDb.js';
+import { investigateAddress } from '../adminInvestigation.js';
+import { loadSubscriptions } from '../subscriptions.js';
+import { loadUsageLog } from '../usageLog.js';
 import { logger } from '../utils/logger.js';
 
 const STATE_FILE = 'tether-blacklist-watcher.json';
@@ -35,7 +38,7 @@ async function main() {
     try {
       const result = await runOnce();
       if (result.added.length > 0) {
-        await notifyAdmins(formatAddedReport(result.added));
+        await notifyAdmins(await formatAddedReport(result.added));
       }
       if (result.removed.length > 0) {
         logger.info(`Tether watcher observed removed blacklist addresses: ${result.removed.length}`);
@@ -252,28 +255,103 @@ async function notifyAdmins(message) {
   }
 }
 
-function formatAddedReport(items) {
+async function formatAddedReport(items) {
+  const [riskDb, usage, subs] = await Promise.all([
+    loadRiskDb(),
+    loadUsageLog(),
+    loadSubscriptions(),
+  ]);
+
   const lines = [
     '<b>🚨 عناوين جديدة دخلت قائمة Tether السوداء</b>',
     '',
     `العدد: <b>${items.length}</b>`,
     '',
-    ...items.slice(0, 20).map((item, index) => [
-      `${index + 1}. <code>${item.address}</code>`,
-      `الوقت: <code>${shortDate(item.timestamp)}</code>`,
-      item.txid ? `العملية: <a href="https://tronscan.org/#/transaction/${item.txid}">TronScan</a>` : null,
-      item.block ? `البلوك: <code>${item.block}</code>` : null,
-      `تحقق مباشر: <code>${item.verified === true ? 'محظور' : item.verified === false ? 'غير مؤكد' : 'تعذر التحقق'}</code>`,
-    ].filter(Boolean).join('\n')),
+    ...items.slice(0, 10).map((item, index) => {
+      const investigation = investigateAddress(item.address, { riskDb, usage, subs, limit: 20 });
+      return formatAddedItem(item, index, investigation);
+    }),
   ];
-  if (items.length > 20) lines.push('', `... و ${items.length - 20} عنوان آخر`);
+  if (items.length > 10) lines.push('', `... و ${items.length - 10} عنوان آخر`);
   return lines.join('\n');
+}
+
+function formatAddedItem(item, index, investigation) {
+  return [
+    `${index + 1}. ${addressLink(item.address)}`,
+    `وقت الحظر: <code>${shortDate(item.timestamp)}</code>`,
+    item.txid ? `العملية: <a href="https://tronscan.org/#/transaction/${encodeURIComponent(item.txid)}">TronScan</a>` : null,
+    item.block ? `البلوك: <code>${escapeHtml(item.block)}</code>` : null,
+    `تحقق مباشر: <code>${verificationLabel(item.verified)}</code>`,
+    '',
+    ...formatCommunityImpact(investigation),
+  ].filter(Boolean).join('\n');
+}
+
+function formatCommunityImpact(result) {
+  const impacted =
+    result.summary.directUserMatches +
+    result.summary.directWatchMatches +
+    result.summary.directRelatedUserMatches +
+    result.summary.indirectRelatedUserMatches;
+
+  const lines = [
+    '<b>أثره داخل مجتمع البوت</b>',
+    `• بحث مباشر عن العنوان: <b>${result.summary.directUserMatches}</b> مستخدم`,
+    `• متابعة مباشرة للعنوان: <b>${result.summary.directWatchMatches}</b> مستخدم`,
+    `• مستخدمون بحثوا/تابعوا عناوين مرتبطة مباشرة: <b>${result.summary.directRelatedUserMatches}</b>`,
+    `• مستخدمون ضمن ارتباط غير مباشر: <b>${result.summary.indirectRelatedUserMatches}</b>`,
+    `• علاقات مباشرة في قاعدة البوت: <b>${result.summary.directRelations}</b>`,
+  ];
+
+  if (impacted === 0) {
+    lines.push('لا يوجد أثر ظاهر داخل مجتمع البوت حاليا.');
+    return lines;
+  }
+
+  const directHits = formatImpactHits(result.directHits, 'أهم ارتباط مباشر');
+  const indirectHits = formatImpactHits(result.indirectHits, 'أهم ارتباط غير مباشر');
+  return [...lines, ...directHits, ...indirectHits];
+}
+
+function formatImpactHits(items, label) {
+  if (!items?.length) return [];
+  return items.slice(0, 3).map((item) => {
+    const users = [...(item.users ?? []), ...(item.watchers ?? [])]
+      .slice(0, 3)
+      .map(formatUser)
+      .join('، ');
+    return `• ${label}: ${addressLink(item.address)} | المستخدمون: ${users || '-'} | علاقات: <b>${item.edgeCount}</b>`;
+  });
+}
+
+function verificationLabel(value) {
+  if (value === true) return 'محظور';
+  if (value === false) return 'غير مؤكد';
+  return 'تعذر التحقق';
+}
+
+function addressLink(address) {
+  const safe = escapeHtml(address);
+  return `<a href="https://tronscan.org/#/address/${encodeURIComponent(address)}">${safe}</a>`;
+}
+
+function formatUser(user) {
+  return escapeHtml(user.username || user.name || user.userId || '-');
 }
 
 function shortDate(timestamp) {
   const date = new Date(timestamp);
   const pad = value => String(value).padStart(2, '0');
   return `${pad(date.getUTCDate())}-${pad(date.getUTCMonth() + 1)}-${String(date.getUTCFullYear()).slice(-2)} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 function parseIdList(value) {
