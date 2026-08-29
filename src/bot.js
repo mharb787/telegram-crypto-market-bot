@@ -5,7 +5,15 @@ import { startSubscriptionTasks } from './subscriptionTasks.js';
 import { logger }        from './utils/logger.js';
 
 export function createBot(token) {
-  const bot = new TelegramBot(token, { polling: true });
+  const bot = new TelegramBot(token, {
+    polling: {
+      interval: 300,
+      params: { timeout: 10 },
+    },
+    // The library keeps HTTP connections alive by default. Without a client-side
+    // timeout, a half-open Telegram connection can leave polling stuck forever.
+    request: { timeout: 30_000 },
+  });
 
   bot.onText(/\/start/, (msg) => {
     handleStart(bot, msg.chat.id).catch((err) =>
