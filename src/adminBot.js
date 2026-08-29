@@ -38,7 +38,14 @@ if (allowedChatIds.size === 0) {
   process.exit(1);
 }
 
-const bot = new TelegramBot(token, { polling: true });
+const bot = new TelegramBot(token, {
+  polling: {
+    interval: 300,
+    params: { timeout: 10 },
+  },
+  // Prevent a dead keep-alive connection from freezing admin polling forever.
+  request: { timeout: 30_000 },
+});
 const userBot = userBotToken ? new TelegramBot(userBotToken, { polling: false }) : null;
 const adminKeyboard = {
   reply_markup: {
