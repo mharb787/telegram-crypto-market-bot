@@ -9,10 +9,8 @@ import {
 } from '../api/trongrid.js';
 import { readJson, writeJson } from '../storage.js';
 import {
-  enqueueAddress,
   loadRiskDb,
-  saveRiskDb,
-  upsertAddress,
+  updateRiskAddress,
 } from './riskDb.js';
 import { investigateAddress } from '../adminInvestigation.js';
 import { loadSubscriptions } from '../subscriptions.js';
@@ -67,10 +65,8 @@ async function runOnce() {
   const removedEvents = await fetchEvents('RemovedBlackList', from);
   const allEvents = [...addedEvents, ...removedEvents]
     .sort((a, b) => Number(a.block_timestamp ?? 0) - Number(b.block_timestamp ?? 0));
-  const db = await loadRiskDb();
   const added = [];
   const removed = [];
-  let changed = false;
   let lastTimestamp = Number(state.lastTimestamp ?? 0);
 
   for (const event of allEvents) {
@@ -89,22 +85,16 @@ async function runOnce() {
     lastTimestamp = Math.max(lastTimestamp, timestamp);
 
     if (eventName === 'AddedBlackList') {
-      const current = db.addresses?.[address];
-      const wasKnownBlacklisted = current?.isBlacklisted === true;
       const verified = await verifyBlacklisted(address);
-      upsertAddress(db, address, {
+      const result = await updateRiskAddress(address, {
         isBlacklisted: true,
         sources: ['tether_event'],
         lastChecked: new Date(timestamp).toISOString(),
         tetherBlacklistedAt: new Date(timestamp).toISOString(),
+      }, {
+        enqueue: { priority: 1, depth: 0, reason: 'tether_added_blacklist_event' },
       });
-      enqueueAddress(db, address, {
-        priority: 1,
-        depth: 0,
-        reason: 'tether_added_blacklist_event',
-      });
-      changed = true;
-      if (!wasKnownBlacklisted) {
+      if (result.previous?.isBlacklisted !== true) {
         added.push({
           address,
           timestamp,
@@ -114,14 +104,13 @@ async function runOnce() {
         });
       }
     } else if (eventName === 'RemovedBlackList') {
-      upsertAddress(db, address, {
+      await updateRiskAddress(address, {
         isBlacklisted: false,
         wasBlacklisted: true,
         sources: ['tether_event_removed'],
         lastChecked: new Date(timestamp).toISOString(),
         unblacklistedAt: new Date(timestamp).toISOString(),
       });
-      changed = true;
       removed.push({
         address,
         timestamp,
@@ -131,7 +120,6 @@ async function runOnce() {
     }
   }
 
-  if (changed) await saveRiskDb(db);
   await saveState({
     lastTimestamp: Math.max(lastTimestamp, Date.now() - OVERLAP_MS),
     seenEventIds: [...seen].slice(-1000),

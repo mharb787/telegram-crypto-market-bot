@@ -1,6 +1,6 @@
 import { getRecentUSDTTransfers } from './api/trongrid.js';
 import { checkOnChain } from './validator/onchain.js';
-import { getLocalRiskForAddress, loadRiskDb } from './crawler/riskDb.js';
+import { queryLocalRiskForAddress } from './crawler/riskDb.js';
 import { getTrustedEntity } from './trustedEntities.js';
 import {
   activateSubscription,
@@ -255,7 +255,6 @@ async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
   if (reviewed.length === 0) return [];
 
   const confirmedKeys = new Set(confirmedInteractions.map(item => interactionKey(item)));
-  const riskDb = await loadRiskDb();
   const indirect = [];
 
   for (const interaction of reviewed) {
@@ -263,7 +262,7 @@ async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
     if (confirmedKeys.has(interactionKey(interaction))) continue;
     if (await getTrustedEntity(interaction.counterparty)) continue;
 
-    const risk = getLocalRiskForAddress(riskDb, interaction.counterparty);
+    const risk = await queryLocalRiskForAddress(interaction.counterparty);
     const count = risk.blacklistedEdges?.length ?? 0;
     const isDirectlyBlacklisted = risk.addressInfo?.isBlacklisted === true;
     if (count === 0 || isDirectlyBlacklisted) continue;

@@ -7,12 +7,9 @@ import {
 } from '../api/trongrid.js';
 import { screenTronAddressRisk } from '../api/oklink.js';
 import {
-  enqueueAddress,
-  getLocalRiskForAddress,
-  loadRiskDb,
-  recordEdge,
-  saveRiskDb,
-  upsertAddress,
+  getBlacklistedAddressSet,
+  persistRiskFindingsToStore,
+  queryLocalRiskForAddress,
 } from '../crawler/riskDb.js';
 import { ensureTrustedLargeUsdtHolder, getTrustedEntity } from '../trustedEntities.js';
 import { logger } from '../utils/logger.js';
@@ -193,11 +190,11 @@ function uniqueCounterparties(address, transfers) {
 async function auditBlacklistedCounterparties(address, transfers, counterparties) {
   const statuses = new Map();
   const unknownCounterparties = [];
-  const db = await loadRiskDb();
+  const locallyBlacklisted = await getBlacklistedAddressSet(counterparties);
   const unknown = [];
 
   for (const addr of counterparties) {
-    if (db.addresses[addr]?.isBlacklisted === true) {
+    if (locallyBlacklisted.has(addr)) {
       statuses.set(addr, true);
     } else {
       unknown.push(addr);
@@ -305,8 +302,7 @@ function getCounterparty(address, tx) {
 }
 
 async function loadLocalRisk(address, { excludeBlacklistedAddress = null } = {}) {
-  const db = await loadRiskDb();
-  const risk = getLocalRiskForAddress(db, address);
+  const risk = await queryLocalRiskForAddress(address);
   const filteredEdges = [];
   for (const edge of risk.blacklistedEdges) {
     const riskyAddress = edge.blacklistedAddress ?? edge.counterparty ?? (edge.from === address ? edge.to : edge.from);
@@ -324,54 +320,7 @@ async function loadLocalRisk(address, { excludeBlacklistedAddress = null } = {})
 }
 
 async function persistRiskFindings(address, isBanned, interactions) {
-  const db = await loadRiskDb();
-  const now = new Date().toISOString();
-  let changed = false;
-
-  if (isBanned === true) {
-    upsertAddress(db, address, {
-      isBlacklisted: true,
-      sources: ['user_check'],
-      lastChecked: now,
-    });
-    enqueueAddress(db, address, {
-      priority: 1,
-      depth: 0,
-      reason: 'user_checked_blacklisted',
-    });
-    changed = true;
-  }
-
-  for (const item of interactions) {
-    upsertAddress(db, item.counterparty, {
-      isBlacklisted: true,
-      sources: ['user_check_counterparty'],
-      lastChecked: now,
-    });
-    enqueueAddress(db, item.counterparty, {
-      priority: 2,
-      depth: 0,
-      reason: `counterparty_of_user_check:${address}`,
-    });
-
-    const isSent = item.direction === 'sent';
-    const edgeAdded = recordEdge(db, {
-      txid: item.txid,
-      from: isSent ? address : item.counterparty,
-      to: isSent ? item.counterparty : address,
-      amount: item.amount,
-      token: item.token ?? 'USDT',
-      timestamp: item.timestamp ?? null,
-      date: item.date ?? null,
-      blacklistedAddress: item.counterparty,
-      counterparty: item.counterparty,
-      source: 'user_check',
-    });
-
-    changed = changed || edgeAdded;
-  }
-
-  if (changed) await saveRiskDb(db);
+  return persistRiskFindingsToStore({ address, isBanned, interactions });
 }
 
 function computeRisk({ isBanned, ageInfo, bannedCounterparties, indirectRiskInteractions, oklink, local, trustedEntity }) {

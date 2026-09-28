@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { isBlacklistedByTether } from '../api/trongrid.js';
-import { loadRiskDb } from './riskDb.js';
+import { listRiskCandidateAddresses } from './riskDb.js';
 import { loadSubscriptions } from '../subscriptions.js';
 import { readJson, writeJson } from '../storage.js';
 import { ensureTrustedLargeUsdtHolder, getTrustedEntity } from '../trustedEntities.js';
@@ -74,14 +74,7 @@ async function collectCandidateAddresses() {
     if (isTronAddress(address)) seen.add(address);
   };
 
-  const riskDb = await loadRiskDb();
-  for (const item of Object.values(riskDb.addresses ?? {})) add(item.address);
-  for (const edge of Object.values(riskDb.edges ?? {})) {
-    add(edge.from);
-    add(edge.to);
-    add(edge.counterparty);
-    add(edge.blacklistedAddress);
-  }
+  for (const address of await listRiskCandidateAddresses()) add(address);
 
   const subs = await loadSubscriptions();
   for (const user of Object.values(subs.users ?? {})) {
