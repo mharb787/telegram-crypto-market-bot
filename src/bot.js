@@ -8,7 +8,13 @@ export function createBot(token) {
   const bot = new TelegramBot(token, {
     polling: {
       interval: 300,
-      params: { timeout: 10 },
+      // Telegram keeps the last allowed_updates value when it is omitted.
+      // Request callback_query explicitly so inline buttons keep working even
+      // if another deployment previously limited polling to messages only.
+      params: {
+        timeout: 10,
+        allowed_updates: ['message', 'callback_query'],
+      },
     },
     // The library keeps HTTP connections alive by default. Without a client-side
     // timeout, a half-open Telegram connection can leave polling stuck forever.
@@ -37,6 +43,9 @@ export function createBot(token) {
   });
 
   bot.on('callback_query', (query) => {
+    logger.info(
+      `Callback received — chat:${query.message?.chat?.id ?? '-'} data:${query.data ?? '-'}`
+    );
     handleCallback(bot, query).catch((err) =>
       logger.error('handleCallback error:', err)
     );
