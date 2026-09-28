@@ -324,17 +324,36 @@ async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
     logger.info(`On-chain check done — risk:${onchain.risk} addr:${text}`);
 
     const report = onChainReport(text, fmt, onchain, { mode: options.mode });
-    // Deliver the result before cleanup. A half-open Telegram delete request used
-    // to block here indefinitely, so users saw the spinner stop without a report.
-    await telegramCall(
-      bot.sendMessage(chatId, report, resultWatchOptions(text, { includeDeep: options.mode !== 'deep' })),
-      'result message send'
-    );
-    logger.info(`On-chain report sent — chat:${chatId} addr:${text}`);
-    await deleteMessageQuietly(bot, chatId, loading.message_id);
+    const resultOptions = resultWatchOptions(text, { includeDeep: options.mode !== 'deep' });
+    let deliveryMethod = 'send';
+    let delivered;
+
     if (options.replaceMessageId) {
-      await deleteMessageQuietly(bot, chatId, options.replaceMessageId);
+      try {
+        delivered = await telegramCall(
+          bot.editMessageText(report, {
+            chat_id: chatId,
+            message_id: options.replaceMessageId,
+            ...resultOptions,
+          }),
+          'deep result message edit'
+        );
+        deliveryMethod = 'edit';
+      } catch (editErr) {
+        logger.warn(`Deep result edit failed, falling back to send: ${editErr.message}`);
+      }
     }
+
+    if (!delivered) {
+      delivered = await telegramCall(
+        bot.sendMessage(chatId, report, resultOptions),
+        'result message send'
+      );
+    }
+    logger.info(
+      `On-chain report delivered — chat:${chatId} addr:${text} method:${deliveryMethod} message:${delivered?.message_id ?? options.replaceMessageId ?? '-'}`
+    );
+    await deleteMessageQuietly(bot, chatId, loading.message_id);
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
     await saveSubscriptions(db);
