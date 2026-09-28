@@ -15,6 +15,8 @@ import {
   mainKeyboard,
 } from './commandHandler.js';
 import { logger } from '../utils/logger.js';
+
+const TELEGRAM_ACTION_TIMEOUT_MS = Math.max(5_000, Number(process.env.TELEGRAM_ACTION_TIMEOUT_MS) || 15_000);
 import { recordUsage } from '../usageLog.js';
 import {
   addWatch,
@@ -322,23 +324,36 @@ async function handleWalletCheck(bot, msg, db, user, text, options = {}) {
     logger.info(`On-chain check done — risk:${onchain.risk} addr:${text}`);
 
     const report = onChainReport(text, fmt, onchain, { mode: options.mode });
+    // Deliver the result before cleanup. A half-open Telegram delete request used
+    // to block here indefinitely, so users saw the spinner stop without a report.
+    await telegramCall(
+      bot.sendMessage(chatId, report, resultWatchOptions(text, { includeDeep: options.mode !== 'deep' })),
+      'result message send'
+    );
+    logger.info(`On-chain report sent — chat:${chatId} addr:${text}`);
     await deleteMessageQuietly(bot, chatId, loading.message_id);
     if (options.replaceMessageId) {
       await deleteMessageQuietly(bot, chatId, options.replaceMessageId);
     }
-    await bot.sendMessage(chatId, report, resultWatchOptions(text, { includeDeep: options.mode !== 'deep' }));
   } catch (err) {
     logger.error('On-chain check failed:', err.message);
     await saveSubscriptions(db);
     await deleteMessageQuietly(bot, chatId, loading.message_id);
-    await bot.sendMessage(
-      chatId,
-      `✅ *صيغة العنوان صحيحة*\n\n` +
-      `\`${text}\`\n\n` +
-      `⚠️ *تعذّر الاتصال بشبكة TRON*\n_${err.message}_\n\n` +
-      `حاول إرسال العنوان مرة أخرى بعد قليل.`,
-      { parse_mode: 'Markdown', ...mainKeyboard }
-    );
+    try {
+      await telegramCall(
+        bot.sendMessage(
+          chatId,
+          `✅ *صيغة العنوان صحيحة*\n\n` +
+          `\`${text}\`\n\n` +
+          `⚠️ *تعذّر الاتصال بشبكة TRON*\n_${err.message}_\n\n` +
+          `حاول إرسال العنوان مرة أخرى بعد قليل.`,
+          { parse_mode: 'Markdown', ...mainKeyboard }
+        ),
+        'failure message send'
+      );
+    } catch (sendErr) {
+      logger.error('Failure message send failed:', sendErr.message);
+    }
   }
 }
 
@@ -781,8 +796,23 @@ function shortDate(value) {
 
 async function deleteMessageQuietly(bot, chatId, messageId) {
   try {
-    await bot.deleteMessage(chatId, messageId);
+    await telegramCall(bot.deleteMessage(chatId, messageId), 'message delete');
   } catch (err) {
     logger.warn('Loading message delete failed:', err.message);
+  }
+}
+
+async function telegramCall(promise, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${TELEGRAM_ACTION_TIMEOUT_MS}ms`)),
+      TELEGRAM_ACTION_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
