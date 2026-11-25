@@ -5,16 +5,19 @@ export function parseExchangeTag(address, data, now = Date.now()) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if (data.address != null && data.address !== address) return null;
   if (data.code != null && !['0', '200'].includes(String(data.code))) return null;
-  if (typeof data.blueTag !== 'string') return null;
-  const tag = data.blueTag.trim();
+  for (const tagType of ['blueTag', 'publicTag']) {
+  if (typeof data[tagType] !== 'string') continue;
+  const tag = data[tagType].trim();
   // An exact platform name or a narrowly defined wallet designation, never a substring.
   const name = EXCHANGES.find(name => {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`^${escaped}(?:[ :_-]+(?:(?:hot|cold|deposit|withdrawal)(?:[ _-]+wallet)?|wallet|exchange))?(?:[ #:_-]*\\d+)?$`, 'i').test(tag);
   });
-  return name ? { address, name, type: 'platform', auto: true, blueTag: tag,
-    source: 'tronscan_blue_tag', verifiedAt: new Date(now).toISOString(),
-    sourceUrl: `${ENDPOINT}?address=${encodeURIComponent(address)}` } : null;
+  if (name) return { address, name, type: 'platform', auto: true, tag, tagType, blueTag: data.blueTag ?? '', publicTag: data.publicTag ?? '',
+    source: tagType === 'blueTag' ? 'tronscan_blue_tag' : 'tronscan_public_tag', verifiedAt: new Date(now).toISOString(),
+    sourceUrl: `${ENDPOINT}?address=${encodeURIComponent(address)}` };
+  }
+  return null;
 }
 
 export function createExchangeTagLookup({ fetcher = (...args) => fetch(...args), now = Date.now,

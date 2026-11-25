@@ -21,7 +21,7 @@ test('direct checks, historical trust, monitoring and background discovery enfor
       tagCalls++;
       assert.equal(init.headers['TRON-PRO-API-KEY'], 'test-only');
       if (scenario.fail) throw new Error('test API failure');
-      return response({ blueTag: scenario.tag ?? '' });
+      return response({ blueTag: scenario.tag ?? '', publicTag: scenario.publicTag ?? '' });
     }
     if (u.pathname === '/wallet/triggerconstantcontract') {
       blacklistCalls++;
@@ -29,7 +29,7 @@ test('direct checks, historical trust, monitoring and background discovery enfor
     }
     if (u.pathname === '/jsonrpc') return response({ result: null });
     if (u.pathname.includes('address-risk-screening')) return response({ code: '0', data: [{ associateBlackAddresses: scenario.high ? 1 : 0 }] });
-    if (u.pathname.endsWith('/transactions/trc20')) return response({ data: [] });
+    if (u.pathname.endsWith('/transactions/trc20')) return response({ data: scenario.transfers ?? [] });
     if (u.pathname.endsWith('/transactions')) return response({ data: [] });
     if (u.pathname.startsWith('/v1/accounts/')) return response({ data: [{ create_time: 1600000000000, trc20: [{ TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t: String((scenario.balance ?? 1) * 1000000) }] }] });
     throw new Error(`Unexpected test URL ${u.pathname}`);
@@ -66,6 +66,20 @@ test('direct checks, historical trust, monitoring and background discovery enfor
     assert.equal(row.result.risk, 'unknown'); assert.equal(row.result.apiError, true);
     assert.equal(row.result.trustedEntity, null);
     assert.ok(!onChainReport(row.addr, String, row.result).includes('✅ غير محظور'));
+    const { persistRiskFindingsToStore } = await import('../src/crawler/riskDb.js');
+    const platform = base + 'X';
+    await persistRiskFindingsToStore({ address: platform, isBanned: false,
+      interactions: [{ counterparty: base + 'W', txid: 'historical-risk', amount: 2500, direction: 'received', timestamp: 1 }] });
+    const watched = base + 'V';
+    scenario = { publicTag: 'Binance-Hot 14', transfers: [{ type: 'Transfer', from: platform, to: watched,
+      token_info: { address: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6, symbol: 'USDT' },
+      value: '3998000000', transaction_id: 'exchange-transfer', block_timestamp: Date.now() }] };
+    tagCalls = 0;
+    const indirectCheck = await checkOnChain(watched);
+    assert.equal(indirectCheck.indirectRiskInteractions.length, 0, 'discover previously unknown platform counterparties');
+    assert.equal(indirectCheck.risk, 'safe');
+    assert.equal((await getTrustedEntity(platform)).name, 'Binance');
+    assert.ok(tagCalls > 0);
     const legacy = base + 'Z';
     await upsertTrustedEntity(legacy, { name: 'old', auto: true, source: 'auto_large_usdt_balance' });
     scenario = { tag: '' }; tagCalls = 0;

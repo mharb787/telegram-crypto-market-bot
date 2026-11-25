@@ -256,6 +256,8 @@ async function findIndirectRiskInteractions(address, transfers, bannedCounterpar
     const risk = await loadLocalRisk(interaction.counterparty, { excludeBlacklistedAddress: address });
     if (risk.isBlacklisted === true) continue;
     if (risk.blacklistedInteractionCount <= 0) continue;
+    // Discover the counterparty's platform label before propagating its high risk.
+    if (await ensureTrustedLargeUsdtHolder(interaction.counterparty, null, { highRisk: true })) continue;
 
     seen.add(interaction.counterparty);
     interactions.push({

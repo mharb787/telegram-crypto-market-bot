@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { createExchangeTagLookup, parseExchangeTag } from '../src/api/tronscan.js';
 const address = 'TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb';
 
-test('only an official blueTag identifying the exact platform qualifies', () => {
+test('only a TRONSCAN blueTag or publicTag identifying the exact platform qualifies', () => {
   assert.equal(parseExchangeTag(address, { blueTag: 'Binance-Cold 2' }).name, 'Binance');
-  for (const data of [{}, { blueTag: '' }, { publicTag: 'Binance-Cold 2' },
+  assert.equal(parseExchangeTag(address, { blueTag: '', publicTag: 'Binance-Hot 14' }).source, 'tronscan_public_tag');
+  for (const data of [{}, { blueTag: '' }, { publicTag: 'Binance scam' },
     { blueTag: 'Not Binance' }, { blueTag: 'Binance scam' }, { blueTag: 'Binance Charity' },
     { blueTag: { name: 'Binance' } }, { blueTag: 'Binance', address: 'another' },
     { blueTag: 'Binance', code: '1000' }]) assert.equal(parseExchangeTag(address, data), null);

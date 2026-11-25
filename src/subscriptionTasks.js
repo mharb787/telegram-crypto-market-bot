@@ -1,7 +1,7 @@
 import { getRecentUSDTTransfers } from './api/trongrid.js';
 import { checkOnChain } from './validator/onchain.js';
 import { queryLocalRiskForAddress } from './crawler/riskDb.js';
-import { getTrustedEntity } from './trustedEntities.js';
+import { getTrustedEntity, ensureTrustedLargeUsdtHolder } from './trustedEntities.js';
 import {
   activateSubscription,
   alertMuteGroupId,
@@ -104,7 +104,7 @@ async function scanWatchedWallets() {
 export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
   try {
     const checkedAt = new Date().toISOString();
-    if (options.periodic && watch.trustPolicyVersion === 2 && isWatchScanCompleteForToday(watch, checkedAt)) {
+    if (options.periodic && watch.trustPolicyVersion === 3 && isWatchScanCompleteForToday(watch, checkedAt)) {
       return { changed: false, skippedCompletedToday: true };
     }
     const scanProgress = getWatchScanProgress(watch, checkedAt, options);
@@ -124,7 +124,7 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
     watch.lastRisk = onchain.risk ?? null;
     watch.lastError = onchain.apiError ? (onchain.apiErrorReason ?? 'incomplete scan') : null;
     if (!onchain.apiError) {
-      watch.trustPolicyVersion = 2;
+      watch.trustPolicyVersion = 3;
       watch.scanProgress = {
         ...scanProgress,
         scanned,
@@ -256,6 +256,7 @@ async function findIndirectRiskInteractions(onchain, confirmedInteractions) {
     const count = risk.blacklistedEdges?.length ?? 0;
     const isDirectlyBlacklisted = risk.addressInfo?.isBlacklisted === true;
     if (count === 0 || isDirectlyBlacklisted) continue;
+    if (await ensureTrustedLargeUsdtHolder(interaction.counterparty, null, { highRisk: true })) continue;
 
     indirect.push({
       ...interaction,

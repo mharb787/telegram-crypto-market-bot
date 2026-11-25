@@ -29,7 +29,7 @@ export async function getTrustedEntity(address, options = {}) {
   if (!entity) return null;
   const blacklisted = Object.hasOwn(options, 'blacklisted') ? options.blacklisted : await isBlacklistedByTether(address).catch(() => null);
   if (blacklisted !== false) return null;
-  if (!entity.auto && !['auto_large_usdt_balance', 'tronscan_blue_tag'].includes(entity.source)) return entity;
+  if (!entity.auto && !['auto_large_usdt_balance', 'tronscan_blue_tag', 'tronscan_public_tag'].includes(entity.source)) return entity;
   // Historical balance-only entries and expired labels must be verified again.
   const verified = await lookupExchangeTag(address);
   if (!verified) return null;
@@ -41,7 +41,7 @@ export async function ensureTrustedLargeUsdtHolder(address, knownUsdtBalance = n
   const existing = await getTrustedEntity(address, options);
   if (existing) return existing;
 
-  const usdtBalance = knownUsdtBalance ?? await fetchUsdtBalance(address);
+  const usdtBalance = knownUsdtBalance ?? (options.highRisk ? 0 : await fetchUsdtBalance(address));
   if (!options.highRisk && !(usdtBalance > PLATFORM_AUTO_USDT_BALANCE)) return null;
   const verified = await lookupExchangeTag(address);
   const blacklisted = Object.hasOwn(options, 'blacklisted') ? options.blacklisted : await isBlacklistedByTether(address).catch(() => null);
@@ -63,6 +63,9 @@ export async function upsertTrustedEntity(address, input = {}) {
     reason: input.reason ?? previous.reason ?? null,
     auto: Boolean(input.auto ?? previous.auto ?? false),
     blueTag: input.blueTag ?? previous.blueTag ?? null,
+    publicTag: input.publicTag ?? previous.publicTag ?? null,
+    tag: input.tag ?? previous.tag ?? null,
+    tagType: input.tagType ?? previous.tagType ?? null,
     sourceUrl: input.sourceUrl ?? previous.sourceUrl ?? null,
     verifiedAt: input.verifiedAt ?? previous.verifiedAt ?? null,
     firstSeen: previous.firstSeen ?? now,
