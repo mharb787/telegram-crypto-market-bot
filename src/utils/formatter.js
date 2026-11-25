@@ -24,7 +24,7 @@ export function onChainReport(address, fmtNumber, onchain, options = {}) {
   const localCount = onchain.blacklisted === true ? 0 : (onchain.localRisk?.blacklistedInteractionCount ?? 0);
   const directCount = onchain.blacklistedInteractions?.length ?? 0;
   const indirectCount = onchain.indirectRiskInteractions?.length ?? 0;
-  const trusted = onchain.blacklisted === true ? null : onchain.trustedEntity;
+  const trusted = onchain.blacklisted === false ? onchain.trustedEntity : null;
   const blacklistTxCount = trusted ? directCount : Math.max(localCount, directCount);
   const events = trusted ? [] : collectRiskEvents(address, onchain).slice(0, 5);
   const ageDays = onchain.age?.days;
@@ -68,8 +68,8 @@ export function invalidAddressMessage(address, reason) {
 }
 
 function walletType(onchain, blacklistTxCount) {
-  if (onchain.apiError) return 'فحص غير مكتمل';
   if (onchain.blacklisted === true) return 'عنوان محظور';
+  if (onchain.blacklisted !== false || onchain.apiError) return 'فحص غير مكتمل';
   if (onchain.trustedEntity) return `منصة مركزية موثوقة: ${onchain.trustedEntity.name ?? 'منصة'}`;
   if (blacklistTxCount > 0) return 'غير محظور لكنه تعامل مع القائمة السوداء';
   if ((onchain.indirectRiskInteractions?.length ?? 0) > 0) return 'غير محظور لكن لديه ارتباطات منخفضة الخطورة';
@@ -108,7 +108,8 @@ function connectionSummary(blacklistTxCount, trusted = null, indirectCount = 0) 
 }
 
 function usdtScopeNote(onchain, blacklistTxCount) {
-  if (onchain.blacklisted !== true && onchain.trustedEntity) {
+  if (onchain.blacklisted !== false) return '⚠️ تعذر تأكيد سلامة العنوان؛ حالة حظر Tether غير مؤكدة أو محظورة.';
+  if (onchain.trustedEntity) {
     return 'ℹ️ *ملاحظة:* عناوين المنصات تجمع معاملات عدد كبير من المستخدمين، لذلك لا يتم استخدامها لتقييم مخاطر محفظة فردية.';
   }
   if (onchain.apiError) {

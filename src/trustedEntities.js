@@ -1,9 +1,10 @@
 import { readJson, writeJson } from './storage.js';
-import { getAccount, USDT_CONTRACT } from './api/trongrid.js';
+import { getAccount, USDT_CONTRACT, isBlacklistedByTether } from './api/trongrid.js';
+import { lookupExchangeTag } from './api/tronscan.js';
 
 const TRUSTED_FILE = 'trusted-entities.json';
 const MU = 1_000_000;
-const PLATFORM_AUTO_USDT_BALANCE = Math.max(100000, Number(process.env.PLATFORM_AUTO_USDT_BALANCE) || 5000000);
+const PLATFORM_AUTO_USDT_BALANCE = 300000;
 const DEFAULT_DB = {
   version: 1,
   updatedAt: null,
@@ -22,24 +23,32 @@ export async function saveTrustedEntities(db) {
   await writeJson(TRUSTED_FILE, db);
 }
 
-export async function getTrustedEntity(address) {
+export async function getTrustedEntity(address, options = {}) {
   const db = await loadTrustedEntities();
-  return db.addresses?.[address] ?? null;
+  const entity = db.addresses?.[address];
+  if (!entity) return null;
+  const blacklisted = Object.hasOwn(options, 'blacklisted') ? options.blacklisted : await isBlacklistedByTether(address).catch(() => null);
+  if (blacklisted !== false) return null;
+  if (!entity.auto && !['auto_large_usdt_balance', 'tronscan_blue_tag'].includes(entity.source)) return entity;
+  // Historical balance-only entries and expired labels must be verified again.
+  const verified = await lookupExchangeTag(address);
+  if (!verified) return null;
+  if (entity.verifiedAt === verified.verifiedAt && entity.source === verified.source) return entity;
+  return upsertTrustedEntity(address, verified);
 }
 
-export async function ensureTrustedLargeUsdtHolder(address, knownUsdtBalance = null) {
-  if (await getTrustedEntity(address)) return null;
+export async function ensureTrustedLargeUsdtHolder(address, knownUsdtBalance = null, options = {}) {
+  const existing = await getTrustedEntity(address, options);
+  if (existing) return existing;
 
   const usdtBalance = knownUsdtBalance ?? await fetchUsdtBalance(address);
-  if (usdtBalance < PLATFORM_AUTO_USDT_BALANCE) return null;
+  if (!options.highRisk && !(usdtBalance > PLATFORM_AUTO_USDT_BALANCE)) return null;
+  const verified = await lookupExchangeTag(address);
+  const blacklisted = Object.hasOwn(options, 'blacklisted') ? options.blacklisted : await isBlacklistedByTether(address).catch(() => null);
+  if (blacklisted !== false) return null;
+  if (!verified) return null;
 
-  return upsertTrustedEntity(address, {
-    name: 'منصة مركزية',
-    type: 'platform',
-    source: 'auto_large_usdt_balance',
-    reason: `usdt_balance:${Math.floor(usdtBalance)}`,
-    auto: true,
-  });
+  return upsertTrustedEntity(address, verified);
 }
 
 export async function upsertTrustedEntity(address, input = {}) {
@@ -53,6 +62,9 @@ export async function upsertTrustedEntity(address, input = {}) {
     source: input.source ?? previous.source ?? 'admin',
     reason: input.reason ?? previous.reason ?? null,
     auto: Boolean(input.auto ?? previous.auto ?? false),
+    blueTag: input.blueTag ?? previous.blueTag ?? null,
+    sourceUrl: input.sourceUrl ?? previous.sourceUrl ?? null,
+    verifiedAt: input.verifiedAt ?? previous.verifiedAt ?? null,
     firstSeen: previous.firstSeen ?? now,
     lastSeen: now,
   };

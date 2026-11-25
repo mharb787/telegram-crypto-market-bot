@@ -40,7 +40,7 @@ export async function checkOnChain(address, options = {}) {
     ? await settle(() => screenTronAddressRisk(address))
     : { status: 'fulfilled', value: null };
   await delay(400);
-  let trustedEntity = await getTrustedEntity(address);
+  let trustedEntity = await getTrustedEntity(address, { blacklisted: blacklisted.status === 'fulfilled' ? blacklisted.value : null });
   await delay(100);
   let localRisk = await settle(() => loadLocalRisk(address));
   await delay(400);
@@ -69,7 +69,7 @@ export async function checkOnChain(address, options = {}) {
   const usdtEntry   = acc?.trc20?.find(t => t[USDT_CONTRACT]);
   const usdtBalance = usdtEntry ? Number(usdtEntry[USDT_CONTRACT]) / MU : 0;
   if (!trustedEntity && isBanned !== true) {
-    trustedEntity = await ensureTrustedLargeUsdtHolder(address, usdtBalance);
+    trustedEntity = await ensureTrustedLargeUsdtHolder(address, usdtBalance, { blacklisted: isBanned });
   }
 
   // ── Wallet age ───────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export async function checkOnChain(address, options = {}) {
   // ── Risk score ───────────────────────────────────────────────────────────
   const oklink = oklinkRisk.status === 'fulfilled' ? oklinkRisk.value : null;
   const refreshedLocal = localRisk.status === 'fulfilled' ? localRisk.value : null;
-  const risk = computeRisk({
+  const riskInputs = {
     isBanned,
     ageInfo,
     bannedCounterparties: blacklistAudit.bannedCounterparties,
@@ -110,7 +110,12 @@ export async function checkOnChain(address, options = {}) {
     oklink,
     local: refreshedLocal,
     trustedEntity,
-  });
+  };
+  let risk = computeRisk(riskInputs);
+  if (risk === 'high' && !trustedEntity) {
+    trustedEntity = await ensureTrustedLargeUsdtHolder(address, usdtBalance, { highRisk: true, blacklisted: isBanned });
+    risk = computeRisk({ ...riskInputs, trustedEntity });
+  }
 
   return {
     blacklisted:          isBanned,
@@ -135,8 +140,8 @@ export async function checkOnChain(address, options = {}) {
     localRisk:            refreshedLocal,
     trustedEntity,
     risk,
-    apiError:             account.status === 'rejected' || transfers.status === 'rejected' || Boolean(txList.incomplete),
-    apiErrorReason:       account.status === 'rejected'
+    apiError:             isBanned == null || account.status === 'rejected' || transfers.status === 'rejected' || Boolean(txList.incomplete),
+    apiErrorReason:       isBanned == null ? 'Tether blacklist verification unavailable' : account.status === 'rejected'
       ? (account.reason?.message ?? String(account.reason))
       : transfers.status === 'rejected'
         ? (transfers.reason?.message ?? String(transfers.reason))
@@ -323,12 +328,13 @@ async function persistRiskFindings(address, isBanned, interactions) {
   return persistRiskFindingsToStore({ address, isBanned, interactions });
 }
 
-function computeRisk({ isBanned, ageInfo, bannedCounterparties, indirectRiskInteractions, oklink, local, trustedEntity }) {
+export function computeRisk({ isBanned, ageInfo, bannedCounterparties, indirectRiskInteractions, oklink, local, trustedEntity }) {
   if (isBanned)                      return 'blacklisted';
-  if (trustedEntity)                 return 'safe';
+  if (trustedEntity && isBanned === false) return 'safe';
   if (bannedCounterparties.length)   return 'high';
   if (oklink?.available && oklink.associatedBlackAddresses > 0) return 'high';
   if (local?.blacklistedInteractionCount > 0) return 'high';
+  if (isBanned !== false) return 'unknown';
   if (indirectRiskInteractions?.length > 0) return 'low';
   if (ageInfo && ageInfo.days < 7)   return 'medium';
   return 'safe';

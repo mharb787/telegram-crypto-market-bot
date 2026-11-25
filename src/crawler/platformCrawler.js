@@ -1,9 +1,10 @@
 import 'dotenv/config';
+import { pathToFileURL } from 'node:url';
 import { isBlacklistedByTether } from '../api/trongrid.js';
-import { listRiskCandidateAddresses } from './riskDb.js';
+import { listRiskCandidateAddresses, queryLocalRiskForAddress } from './riskDb.js';
 import { loadSubscriptions } from '../subscriptions.js';
 import { readJson, writeJson } from '../storage.js';
-import { ensureTrustedLargeUsdtHolder, getTrustedEntity } from '../trustedEntities.js';
+import { ensureTrustedLargeUsdtHolder, getTrustedEntity, listTrustedEntities } from '../trustedEntities.js';
 import { logger } from '../utils/logger.js';
 
 const STATE_FILE = 'platform-crawler-state.json';
@@ -21,7 +22,7 @@ async function main() {
   } while (true);
 }
 
-async function runOnce() {
+export async function runOnce() {
   const candidates = await collectCandidateAddresses();
   const state = await loadState();
   const batch = selectBatch(candidates, state.cursor ?? 0, MAX_PER_RUN);
@@ -52,7 +53,9 @@ async function runOnce() {
       continue;
     }
 
-    const entity = await ensureTrustedLargeUsdtHolder(address);
+    const local = await queryLocalRiskForAddress(address);
+    const entity = await ensureTrustedLargeUsdtHolder(address, null, { blacklisted,
+      highRisk: (local.blacklistedEdges?.length ?? 0) > 0 });
     if (entity) {
       added += 1;
       logger.info(`Platform crawler trusted ${address} as ${entity.name} source:${entity.source}`);
@@ -75,6 +78,7 @@ async function collectCandidateAddresses() {
   };
 
   for (const address of await listRiskCandidateAddresses()) add(address);
+  for (const entity of await listTrustedEntities()) add(entity.address);
 
   const subs = await loadSubscriptions();
   for (const user of Object.values(subs.users ?? {})) {
@@ -107,7 +111,7 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-main().catch(err => {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(err => {
   logger.error('Platform crawler fatal:', err.message);
   process.exitCode = 1;
 });

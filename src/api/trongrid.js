@@ -291,8 +291,8 @@ export async function isBlacklistedByTether(address) {
     logger.warn(`RPC blacklist check failed: ${err.message}`);
   }
 
-  // Fallback: TronScan API
-  return checkBlacklistTronScan(address);
+  // Account metadata cannot prove Tether's contract blacklist status.
+  return null;
 }
 
 /**

@@ -104,21 +104,10 @@ async function scanWatchedWallets() {
 export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
   try {
     const checkedAt = new Date().toISOString();
-    if (options.periodic && isWatchScanCompleteForToday(watch, checkedAt)) {
+    if (options.periodic && watch.trustPolicyVersion === 2 && isWatchScanCompleteForToday(watch, checkedAt)) {
       return { changed: false, skippedCompletedToday: true };
     }
     const scanProgress = getWatchScanProgress(watch, checkedAt, options);
-    if (await getTrustedEntity(watch.address)) {
-      watch.lastCheckedAt = checkedAt;
-      watch.lastStatus = 'checked';
-      watch.lastRisk = 'safe';
-      watch.lastError = null;
-      watch.lastSuccessfulCheckedAt = checkedAt;
-      watch.lastSuccessfulRisk = 'safe';
-      watch.lastSuccessfulReviewedTransactions = 0;
-      watch.scanProgress = completeWatchScanProgress(scanProgress, checkedAt, 0);
-      return { changed: true, skippedTrusted: true, alertsCreated: 0, interactions: [] };
-    }
 
     const onchain = await checkOnChain(watch.address, {
       maxReviewedTransfers: scanProgress.chunkSize,
@@ -135,6 +124,7 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
     watch.lastRisk = onchain.risk ?? null;
     watch.lastError = onchain.apiError ? (onchain.apiErrorReason ?? 'incomplete scan') : null;
     if (!onchain.apiError) {
+      watch.trustPolicyVersion = 2;
       watch.scanProgress = {
         ...scanProgress,
         scanned,
@@ -149,7 +139,7 @@ export async function scanSingleWatchedWallet(db, user, watch, options = {}) {
       watch.lastSuccessfulReviewedTransactions = scanned;
     }
 
-    if (onchain.trustedEntity && onchain.blacklisted !== true) {
+    if (onchain.trustedEntity && onchain.blacklisted === false) {
       return { changed: true, skippedTrusted: true, onchain, alertsCreated: 0, interactions: [] };
     }
 
